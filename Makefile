@@ -9,13 +9,17 @@ WEBSOCKETPP_BUILD = build/websocketpp
 INCLUDE_DIRS = -I$(JSON_CPP_SRC)/include -I$(NETLIB_INCLUDE) -I$(WEBSOCKETPP_SRC)
 LD_PATH = -Llib
 
-all: lib/libjsoncpp.a lib/libnetlib.a lib/libwebsocketpp.a
+all: websocketclient
+
+libs: lib/libjsoncpp.a lib/libnetlib.a lib/libwebsocketpp.a
 
 clean:
-	@rm -fv lib/*
-	@rm -fv build/jsoncpp/*
-	@rm -fv build/netlib/*
-	@rm -fv build/websocketpp/*
+	@-rm -fv lib/*
+	@-rm -fv build/jsoncpp/*
+	@-rm -fv build/netlib/*
+	@-rm -fv build/websocketpp/*
+	@-rm websocketclient
+	@-rm websocketclient.o
 
 ######################################
 # JSONCPP BUILD TARGETS
@@ -79,5 +83,14 @@ $(WEBSOCKETPP_BUILD)/data.o: $(WEBSOCKETPP_SRC)/messages/data.cpp
 lib/libwebsocketpp.a: $(WEBSOCKETPP_BUILD)/data.o $(WEBSOCKETPP_BUILD)/hybi_header.o $(WEBSOCKETPP_BUILD)/md5.o $(WEBSOCKETPP_BUILD)/base64.o $(WEBSOCKETPP_BUILD)/sha1.o $(WEBSOCKETPP_BUILD)/network_utilities.o $(WEBSOCKETPP_BUILD)/uri.o
 	ar -rcv lib/libwebsocketpp.a $(WEBSOCKETPP_BUILD)/network_utilities.o $(WEBSOCKETPP_BUILD)/sha1.o $(WEBSOCKETPP_BUILD)/base64.o $(WEBSOCKETPP_BUILD)/md5.o $(WEBSOCKETPP_BUILD)/uri.o $(WEBSOCKETPP_BUILD)/hybi_header.o $(WEBSOCKETPP_BUILD)/data.o
 	ranlib lib/libwebsocketpp.a
+
+#####################################
+# WEBSOCKETCLIENT
+#####################################
+build/websocketclient.o: src/websocketclient.cpp
+	g++ src/websocketclient.cpp $(INCLUDE_DIRS) -c -o build/websocketclient.o
+
+websocketclient: build/websocketclient.o libs
+	g++ -o websocketclient $(LD_PATH) build/websocketclient.o -lwebsocketpp -lnetlib -ljsoncpp -lboost_system -lboost_thread -lboost_date_time -lboost_regex -lboost_random -lboost_program_options -pthread /opt/local/lib/libssl.dylib /opt/local/lib/libcrypto.dylib
 
 .PHONY : clean
