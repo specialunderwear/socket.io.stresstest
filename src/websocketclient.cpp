@@ -34,6 +34,16 @@
 
 using websocketpp::client;
 
+void setlogging(client &endpoint) {
+#if DEBUG
+    endpoint.alog().set_level(websocketpp::log::alevel::ALL);
+    endpoint.elog().set_level(websocketpp::log::alevel::ALL);
+#else
+    endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
+    endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
+#endif    
+}
+
 int main(int argc, char* argv[]) {
     srandom(time(0));
     
@@ -51,18 +61,13 @@ int main(int argc, char* argv[]) {
         sequence::ActionSequence actions = sequence::ActionSequence(input_file);
         socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri, actions);
         
+        std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
+
         client::handler::ptr handler(socket_io_handler);
         client::connection_ptr con;
         client endpoint(handler);
-        std::cout << "websoket_uri " << socket_io_handler->websocket_uri() << std::endl;
         
-#if DEBUG
-        endpoint.alog().set_level(websocketpp::log::alevel::ALL);
-        endpoint.elog().set_level(websocketpp::log::alevel::ALL);
-#else
-        endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
-        endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
-#endif
+        setlogging(endpoint);
         
         con = endpoint.connect(socket_io_handler->websocket_uri());
         con->add_request_header("User Agent","WebSocket++/0.2.0");
