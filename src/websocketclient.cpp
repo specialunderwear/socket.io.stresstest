@@ -35,6 +35,7 @@ int main(int argc, char* argv[]) {
     try {
         sequence::ActionSequence actions = sequence::ActionSequence(input_file);
         socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri, actions);
+        socket_io_handler->loadToken();
         
         std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
 

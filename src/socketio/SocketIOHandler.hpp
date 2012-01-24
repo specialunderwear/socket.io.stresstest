@@ -21,6 +21,7 @@ namespace socketio {
         void _log_message(const std::string &message, const boost::format &next_message);
     public:
         SocketIOHandler(const std::string &host, sequence::ActionSequence &action_sequence);
+        void loadToken();
         std::string websocket_uri() const;
         void on_message(connection_ptr con, message_ptr msg);        
         virtual void on_load(connection_ptr connection, client::handler_ptr old_handler);

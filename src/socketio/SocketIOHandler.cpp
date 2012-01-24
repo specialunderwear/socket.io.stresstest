@@ -13,7 +13,11 @@ namespace socketio {
     :client::handler() {
         _host = host;
         _actions = action_sequence;
-        _websocket_token = _get_token(host);
+    }
+    
+    void SocketIOHandler::loadToken() {
+        _websocket_token = _get_token(_host);
+        std::cout << "got token: " << _websocket_token << std::endl;
     }
     
     std::string SocketIOHandler::_get_token(const std::string &host) {
