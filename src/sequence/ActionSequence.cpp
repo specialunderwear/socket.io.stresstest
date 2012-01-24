@@ -12,12 +12,9 @@ namespace sequence {
         if ( !parsingSuccessful )
         {
             // report to the user the failure and their locations in the document.
-            std::cout  << "Failed to parse configuration\n"
+            std::cout  << "Failed to parse  sequence input file\n"
                        << reader.getFormattedErrorMessages();
             return;
-        }
-        for ( int index = 0; index < _actions.size(); ++index ) {
-            std::cout << _actions[index] << std::endl;
         }
     }
     
@@ -26,7 +23,7 @@ namespace sequence {
             return _actions[_lastIndex++].asString();
         }
         
-        return "";
+        return "stop";
     }
 
 }

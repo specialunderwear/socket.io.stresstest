@@ -5,7 +5,7 @@
 
 namespace sequence {
     class ActionSequence {
-        int _lastIndex;
+        unsigned int _lastIndex;
         Json::Value _actions;
     public:
         ActionSequence();

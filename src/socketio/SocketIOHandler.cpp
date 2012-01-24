@@ -19,7 +19,7 @@ namespace socketio {
     std::string SocketIOHandler::_get_token(const std::string &host) {
         std::stringstream socketio_token_url;
         socketio_token_url << "http://" << host << "/socket.io/1/?t=" << random();
-        std::cout << "getting token: " << socketio_token_url.str() << std::endl;
+
         http::client http_client;
         http::client::request http_request = http::client::request(socketio_token_url.str());
         http_request << header("Connection", "close");
@@ -30,21 +30,31 @@ namespace socketio {
         return socket_io_key.substr(0, first_colon);
     }
     
-    std::string SocketIOHandler::_parse_session_id(const std::string &message) {
+    Json::Value _parse_message(const std::string &message) {
         std::string json_string = std::string(message.begin()+4, message.end());
-        std::cout << "json_string: " << json_string << std::endl;
+
         Json::Value root;
         Json::Reader reader;
         bool success = reader.parse(json_string, root);
         if (!success) {
             std::cout  << "Failed to parse message body\n"
                        << reader.getFormattedErrorMessages();
-            return "";
+            return Json::Value();
         }
-        std::cout << "args: " << root["args"] << std::endl;
-        std::cout << "args[0]: " << root["args"][0] << std::endl;
-        std::cout << "args[0][SessionID]: " << root["args"][0]["SessionID"] << std::endl;
+        return root;
+    }
+    std::string SocketIOHandler::_parse_session_id(const std::string &message) {
+        Json::Value root = _parse_message(message);
         return root["args"][0]["SessionID"].asString();
+    }
+    
+    void SocketIOHandler::_log_message(const std::string &message, const boost::format &next_message) {
+        Json::StyledWriter writer;
+        std::cout << "message received:" << std::endl;
+        std::cout << writer.write(_parse_message(message)) << std::endl;
+        std::cout << "next message:" << std::endl;
+        std::cout << writer.write(_parse_message(next_message.str())) << std::endl;
+        std::cout << std::endl;
     }
     
     std::string SocketIOHandler::websocket_uri() const {
@@ -58,32 +68,29 @@ namespace socketio {
         if (payload.substr(0, 3) == "5::") {
             if (sessionid.empty()) {
                 sessionid = _parse_session_id(payload);
-                std::cout << "sessionid: " << sessionid << std::endl;
             }
-            std::cout << "payload: " << payload << std::endl;
+            
             std::string next_message = _actions.nextAction();
             if (next_message != "stop") {
-                std::cout << "next message: " << next_message << std::endl;
                 boost::format formatted_message = boost::format(next_message) % sessionid;
-                std::cout << "next message" << formatted_message << std::endl;
+                _log_message(payload, formatted_message);
                 con->send(formatted_message.str(), websocketpp::frame::opcode::TEXT);
             } else {
-                std::cout << "closing connection" << std::endl;
                 con->close(websocketpp::close::status::NORMAL, "End of test sequence");
             }
         }
-        // con->wait();
     }
+    
     void SocketIOHandler::on_load(connection_ptr connection, client::handler_ptr old_handler) {
-            std::cout << " on load lol" << std::endl;
+            std::cout << "connection loaded." << std::endl;
         }
         
     void SocketIOHandler::on_close(connection_ptr connection) {
-        std::cout << " on load lol" << std::endl;
+        std::cout << "connection closed." << std::endl;
     };
 
     void SocketIOHandler::on_open(connection_ptr con) {
-        std::cout << " on open lol" << std::endl;
+        std::cout << "connection opened." << std::endl;
         con->send(_actions.nextAction(), websocketpp::frame::opcode::TEXT);
     };
     

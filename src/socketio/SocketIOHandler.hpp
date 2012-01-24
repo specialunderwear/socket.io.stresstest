@@ -18,6 +18,7 @@ namespace socketio {
 
         std::string _get_token(const std::string &host);
         std::string _parse_session_id(const std::string &message);
+        void _log_message(const std::string &message, const boost::format &next_message);
     public:
         SocketIOHandler(const std::string &host, sequence::ActionSequence &action_sequence);
         std::string websocket_uri() const;

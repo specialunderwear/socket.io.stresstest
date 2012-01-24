@@ -54,10 +54,13 @@ int main(int argc, char* argv[]) {
         client endpoint(handler);
         std::cout << "websoket_uri " << socket_io_handler->websocket_uri() << std::endl;
         
-        //endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
-        //endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
+#if DEBUG
         endpoint.alog().set_level(websocketpp::log::alevel::ALL);
         endpoint.elog().set_level(websocketpp::log::alevel::ALL);
+#else
+        endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
+        endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
+#endif
         
         con = endpoint.connect(socket_io_handler->websocket_uri());
         con->add_request_header("User Agent","WebSocket++/0.2.0");
