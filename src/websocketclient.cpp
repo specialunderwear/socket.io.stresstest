@@ -30,6 +30,7 @@
 #include <websocketpp/websocketpp.hpp>
 
 #include "socketio/SocketIOHandler.hpp"
+#include "sequence/ActionSequence.hpp"
 
 using websocketpp::client;
 
@@ -45,17 +46,20 @@ int main(int argc, char* argv[]) {
     }
     
     try {
-        socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri);
+        sequence::ActionSequence actions = sequence::ActionSequence("input.json");
+        socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri, actions);
+        
         client::handler::ptr handler(socket_io_handler);
         client::connection_ptr con;
         client endpoint(handler);
         std::cout << "websoket_uri " << socket_io_handler->websocket_uri() << std::endl;
+        
         //endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
         //endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
         endpoint.alog().set_level(websocketpp::log::alevel::ALL);
         endpoint.elog().set_level(websocketpp::log::alevel::ALL);
-        con = endpoint.connect(socket_io_handler->websocket_uri());
         
+        con = endpoint.connect(socket_io_handler->websocket_uri());
         con->add_request_header("User Agent","WebSocket++/0.2.0");
         
         endpoint.run();

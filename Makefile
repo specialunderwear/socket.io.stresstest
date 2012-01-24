@@ -92,7 +92,10 @@ build/SocketIOHandler.o: src/socketio/SocketIOHandler.cpp
 build/websocketclient.o: src/websocketclient.cpp
 	g++ src/websocketclient.cpp $(INCLUDE_DIRS) -c -o build/websocketclient.o
 
-websocketclient: build/websocketclient.o build/SocketIOHandler.o libs
-	g++ -o websocketclient $(LD_PATH) build/websocketclient.o build/SocketIOHandler.o -lwebsocketpp -lnetlib -ljsoncpp -lboost_system -lboost_thread -lboost_date_time -lboost_regex -lboost_random -lboost_program_options -pthread /opt/local/lib/libssl.dylib /opt/local/lib/libcrypto.dylib
+build/ActionSequence.o: src/sequence/ActionSequence.cpp
+	g++ src/sequence/ActionSequence.cpp $(INCLUDE_DIRS) -c -o build/ActionSequence.o
+
+websocketclient: build/websocketclient.o build/SocketIOHandler.o build/ActionSequence.o libs
+	g++ -o websocketclient $(LD_PATH) build/websocketclient.o build/SocketIOHandler.o build/ActionSequence.o -lwebsocketpp -lnetlib -ljsoncpp -lboost_system -lboost_thread -lboost_date_time -lboost_regex -lboost_random -lboost_program_options -pthread /opt/local/lib/libssl.dylib /opt/local/lib/libcrypto.dylib
 
 .PHONY : clean
