@@ -1,6 +1,6 @@
 JSON_CPP_SRC = include/jsoncpp
 JSON_CPP_BUILD = build/jsoncpp
-NETLIB_LIB_SRC = include/cpp-netlib/libs/network/src
+NETLIB_LIB_SRC = parts/cpp-netlib/libs/network/src
 NETLIB_INCLUDE = include/cpp-netlib
 NETLIB_BUILD = build/netlib
 WEBSOCKETPP_SRC = include/websocketpp/src
