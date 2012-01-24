@@ -38,15 +38,17 @@ int main(int argc, char* argv[]) {
     srandom(time(0));
     
     std::string uri;
-    if (argc == 2) {
+    char *input_file;
+    if (argc == 3) {
         uri = argv[1];
+        input_file = argv[2];
     } else {
-        std::cout << "Usage: `echo_client hostname:port`" << std::endl;
+        std::cout << "Usage: `websocketclient hostname:port input_file_path.json`" << std::endl;
         exit(0);
     }
     
     try {
-        sequence::ActionSequence actions = sequence::ActionSequence("input.json");
+        sequence::ActionSequence actions = sequence::ActionSequence(input_file);
         socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri, actions);
         
         client::handler::ptr handler(socket_io_handler);
