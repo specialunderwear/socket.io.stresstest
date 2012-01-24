@@ -24,8 +24,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * 
  */
-#include <boost/network/protocol/http/client.hpp>
-#include <boost/network/uri/uri.hpp>
 #include <iostream>
 
 #include <websocketpp/roles/client.hpp>
@@ -33,44 +31,30 @@
 
 #include "socketio/SocketIOHandler.hpp"
 
-using namespace boost::network;
 using websocketpp::client;
 
 int main(int argc, char* argv[]) {
     srandom(time(0));
-    std::stringstream socket_io_start;
-    socket_io_start << "http://localhost:81/socket.io/1/?t=" << random();
-    std::cout << socket_io_start.str() << std::endl;
     
-    http::client client_;
-    http::client::request request_(socket_io_start.str());
-    request_ << header("Connection", "close");
-    http::client::response response_ = client_.get(request_);
-    std::string socket_io_key = body(response_);
-    int first_colon = socket_io_key.find_first_of(":");
-    socket_io_key = socket_io_key.substr(0, first_colon);
-    std::cout << socket_io_key << std::endl;
-    
-    std::stringstream uri;
-    std::stringstream a;
-    uri << "ws://localhost:81/socket.io/1/websocket/" << socket_io_key;// << random();
-    std::cout << uri.str() << std::endl;
+    std::string uri;
     if (argc == 2) {
-        uri << argv[1];
-        std::cout << "kut" << std::endl;
-    } else if (argc > 2) {
-        std::cout << "Usage: `echo_client test_url`" << std::endl;
+        uri = argv[1];
+    } else {
+        std::cout << "Usage: `echo_client hostname:port`" << std::endl;
+        exit(0);
     }
     
     try {
-        client::handler::ptr handler(new socketio::SocketIOHandler());
+        socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri);
+        client::handler::ptr handler(socket_io_handler);
         client::connection_ptr con;
         client endpoint(handler);
-        std::cout << "hi " << uri << std::endl;
+        std::cout << "websoket_uri " << socket_io_handler->websocket_uri() << std::endl;
         //endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
         //endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
         endpoint.alog().set_level(websocketpp::log::alevel::ALL);
-        con = endpoint.connect(uri.str());
+        endpoint.elog().set_level(websocketpp::log::alevel::ALL);
+        con = endpoint.connect(socket_io_handler->websocket_uri());
         
         con->add_request_header("User Agent","WebSocket++/0.2.0");
         

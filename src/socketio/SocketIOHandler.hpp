@@ -9,8 +9,13 @@ using websocketpp::client;
 namespace socketio {
     
     class SocketIOHandler : public client::handler {
+    private:
+        std::string _host;
+        std::string _websocket_token;
+
     public:
-        
+        SocketIOHandler(const std::string &host);
+        std::string websocket_uri() const;
         void on_message(connection_ptr con, message_ptr msg);        
         virtual void on_load(connection_ptr connection, client::handler_ptr old_handler);
         virtual void on_close(connection_ptr connection);
