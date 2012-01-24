@@ -3,7 +3,7 @@ echo "Spawning $1 processes"
 FAIL=0
 for (( i = 0; i <= $1 ; i++ ))
 do
-    ./websocketclient localhost:81 input.json > /dev/null &
+    ./websocketclient $2 $3 > /dev/null &
 done
 for job in `jobs -p`
 do
