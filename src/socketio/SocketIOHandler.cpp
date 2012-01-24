@@ -62,11 +62,13 @@ namespace socketio {
             }
             std::cout << "payload: " << payload << std::endl;
             std::string next_message = _actions.nextAction();
-            if (!next_message.empty()) {
+            if (next_message != "stop") {
+                std::cout << "next message: " << next_message << std::endl;
                 boost::format formatted_message = boost::format(next_message) % sessionid;
                 std::cout << "next message" << formatted_message << std::endl;
                 con->send(formatted_message.str(), websocketpp::frame::opcode::TEXT);
             } else {
+                std::cout << "closing connection" << std::endl;
                 con->close(websocketpp::close::status::NORMAL, "End of test sequence");
             }
         }
