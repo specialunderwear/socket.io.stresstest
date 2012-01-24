@@ -26,40 +26,15 @@
  */
 #include <boost/network/protocol/http/client.hpp>
 #include <boost/network/uri/uri.hpp>
-#include <roles/client.hpp>
-#include <websocketpp.hpp>
 #include <iostream>
 
-using websocketpp::client;
+#include <roles/client.hpp>
+#include <websocketpp.hpp>
+
+#include "socketio/SocketIOHandler.hpp"
+
 using namespace boost::network;
-
-class echo_client_handler : public client::handler {
-public:
-    
-    void on_message(connection_ptr con, message_ptr msg) {
-        std::cout << msg->get_payload() << std::endl;
-        // con->wait();
-    }
-    
-    virtual void on_load(connection_ptr connection, client::handler_ptr old_handler) {
-        std::cout << " on load lol" << std::endl;
-    }
-    
-    virtual void on_close(connection_ptr connection) {
-        std::cout << " on load lol" << std::endl;
-    };
-
-    virtual void on_open(connection_ptr con) {
-        std::cout << " on open lol" << std::endl;
-        std::string a = "5:::{\"name\":\"authentication\",\"args\":[{\"username\":\"admin@amt.de\",\"password\":\"admin\"}]}";
-        con->send(a, websocketpp::frame::opcode::TEXT);
-    };
-    
-    virtual void on_fail(connection_ptr con) {
-        std::cout << "connection failed" << std::endl;
-    }
-};
-
+using websocketpp::client;
 
 int main(int argc, char* argv[]) {
     srandom(time(0));
@@ -88,7 +63,7 @@ int main(int argc, char* argv[]) {
     }
     
     try {
-        client::handler::ptr handler(new echo_client_handler());
+        client::handler::ptr handler(new socketio::SocketIOHandler());
         client::connection_ptr con;
         client endpoint(handler);
         std::cout << "hi " << uri << std::endl;
