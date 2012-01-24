@@ -24,7 +24,9 @@ namespace socketio {
         http::client::request http_request = http::client::request(socketio_token_url.str());
         http_request << header("Connection", "close");
         
+        std::cout << "starting request for " << socketio_token_url.str() << std::endl;
         http::client::response http_request_response = http_client.get(http_request);
+        std::cout << "got " << socketio_token_url.str() << std::endl;
         std::string socket_io_key = body(http_request_response);
         int first_colon = socket_io_key.find_first_of(":");        
         return socket_io_key.substr(0, first_colon);
