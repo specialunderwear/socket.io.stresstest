@@ -51,9 +51,9 @@ namespace socketio {
     void SocketIOHandler::_log_message(const std::string &message, const boost::format &next_message) {
         Json::StyledWriter writer;
         std::cout << "message received:" << std::endl;
-        std::cout << writer.write(_parse_message(message)) << std::endl;
+        std::cout << ((message.size() > 4) ? writer.write(_parse_message(message)) : message) << std::endl;
         std::cout << "next message:" << std::endl;
-        std::cout << writer.write(_parse_message(next_message.str())) << std::endl;
+        std::cout << ((next_message.str().size() > 4) ? writer.write(_parse_message(next_message.str())) : next_message.str()) << std::endl;
         std::cout << std::endl;
     }
     
@@ -72,8 +72,12 @@ namespace socketio {
             
             std::string next_message = _actions.nextAction();
             if (next_message != "stop") {
-                boost::format formatted_message = boost::format(next_message) % sessionid;
+                boost::format formatted_message = boost::format(next_message);
+                formatted_message.exceptions(boost::io::all_error_bits ^ ( boost::io::too_many_args_bit | boost::io::too_few_args_bit ));
+                formatted_message = formatted_message % sessionid;
+
                 _log_message(payload, formatted_message);
+                
                 con->send(formatted_message.str(), websocketpp::frame::opcode::TEXT);
             } else {
                 con->close(websocketpp::close::status::NORMAL, "End of test sequence");
