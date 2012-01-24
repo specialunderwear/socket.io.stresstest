@@ -28,8 +28,8 @@
 #include <boost/network/uri/uri.hpp>
 #include <iostream>
 
-#include <roles/client.hpp>
-#include <websocketpp.hpp>
+#include <websocketpp/roles/client.hpp>
+#include <websocketpp/websocketpp.hpp>
 
 #include "socketio/SocketIOHandler.hpp"
 

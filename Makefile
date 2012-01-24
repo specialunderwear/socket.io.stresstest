@@ -1,12 +1,11 @@
-JSON_CPP_SRC = include/jsoncpp
+JSON_CPP_SRC = parts/jsoncpp
 JSON_CPP_BUILD = build/jsoncpp
 NETLIB_LIB_SRC = parts/cpp-netlib/libs/network/src
-NETLIB_INCLUDE = include/cpp-netlib
 NETLIB_BUILD = build/netlib
-WEBSOCKETPP_SRC = include/websocketpp/src
+WEBSOCKETPP_SRC = parts/websocketpp/src
 WEBSOCKETPP_BUILD = build/websocketpp
 
-INCLUDE_DIRS = -I$(JSON_CPP_SRC)/include -I$(NETLIB_INCLUDE) -I$(WEBSOCKETPP_SRC)
+INCLUDE_DIRS = -Iinclude
 LD_PATH = -Llib
 
 all: websocketclient
@@ -19,7 +18,7 @@ clean:
 	@-rm -fv build/netlib/*
 	@-rm -fv build/websocketpp/*
 	@-rm websocketclient
-	@-rm websocketclient.o
+	@-rm build/*.o
 
 ######################################
 # JSONCPP BUILD TARGETS

@@ -1,8 +1,8 @@
 #ifndef SOCKET_IO_HANDLER
 #define SOCKET_IO_HANDLER
 
-#include <roles/client.hpp>
-#include <websocketpp.hpp>
+#include <websocketpp/roles/client.hpp>
+#include <websocketpp/websocketpp.hpp>
 
 using websocketpp::client;
 
