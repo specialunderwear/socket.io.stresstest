@@ -32,7 +32,9 @@ namespace socketio {
         http::client::response http_request_response = http_client.get(http_request);
         std::cout << "got " << socketio_token_url.str() << std::endl;
         std::string socket_io_key = body(http_request_response);
-        int first_colon = socket_io_key.find_first_of(":");        
+        std::cout << "getting body: " << socket_io_key << std::endl;
+        int first_colon = socket_io_key.find_first_of(":");
+        std::cout << "got index of first colon: " << first_colon << std::endl;
         return socket_io_key.substr(0, first_colon);
     }
     
