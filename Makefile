@@ -8,7 +8,7 @@ WEBSOCKETPP_BUILD = build/websocketpp
 INCLUDE_DIRS = -Iinclude
 LD_PATH = -Llib
 
-CFLAGS = -O2 -Wall -DDEBUG=0
+CFLAGS = -O2 -Wall -DDEBUG=0 -Bstatic
 
 all: websocketclient
 
