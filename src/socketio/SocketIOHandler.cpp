@@ -96,10 +96,6 @@ namespace socketio {
         }
     }
     
-    void SocketIOHandler::on_load(connection_ptr connection, client::handler_ptr old_handler) {
-            std::cout << "connection loaded." << std::endl;
-        }
-        
     void SocketIOHandler::on_close(connection_ptr connection) {
         std::cout << "connection closed." << std::endl;
     };

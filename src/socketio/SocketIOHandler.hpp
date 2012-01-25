@@ -25,7 +25,6 @@ namespace socketio {
         void loadToken();
         std::string websocket_uri() const;
         void on_message(connection_ptr con, message_ptr msg);        
-        virtual void on_load(connection_ptr connection, client::handler_ptr old_handler);
         virtual void on_close(connection_ptr connection);
         virtual void on_open(connection_ptr con);
         virtual void on_fail(connection_ptr con);
