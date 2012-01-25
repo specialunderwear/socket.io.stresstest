@@ -2,6 +2,7 @@
 #include <boost/network/protocol/http/client.hpp>
 #include <boost/network/uri/uri.hpp>
 #include <boost/format.hpp>
+#include <boost/asio.hpp>
 #include <json/json.h>
 
 namespace socketio {
@@ -102,6 +103,9 @@ namespace socketio {
 
     void SocketIOHandler::on_open(connection_ptr con) {
         std::cout << "connection opened." << std::endl;
+        boost::asio::socket_base::keep_alive keepAlive(true);
+        con->get_socket().set_option(keepAlive);
+        //con->get_io_service().set_option(keepAlive);
         con->send(_actions.nextAction(), websocketpp::frame::opcode::TEXT);
     };
     
