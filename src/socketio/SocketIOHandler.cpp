@@ -26,10 +26,17 @@ namespace socketio {
         http::client http_client;
         http::client::request http_request = http::client::request(socketio_token_url.str());
         http_request << header("Connection", "close");
+        
         http::client::response http_request_response = http_client.get(http_request);
-        std::string socket_io_key = body(http_request_response);
-        int first_colon = socket_io_key.find_first_of(":");
-        return socket_io_key.substr(0, first_colon);
+        
+        if (status(http_request_response) == 200) {
+            std::string socket_io_key = body(http_request_response);
+            int first_colon = socket_io_key.find_first_of(":");
+            return socket_io_key.substr(0, first_colon);
+        } else {
+            std::cerr << "socket.io request failed status_code:" << status(http_request_response) << std::endl;
+            exit(1);
+        }
     }
     
     Json::Value _parse_message(const std::string &message) {
@@ -103,7 +110,7 @@ namespace socketio {
     };
     
     void SocketIOHandler::on_fail(connection_ptr con) {
-        std::cout << "connection failed" << std::endl;
+        std::cerr << "connection failed" << std::endl;
         exit(1);
     }
 
