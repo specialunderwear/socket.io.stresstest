@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
         input_file = argv[2];
     } else {
         std::cout << "Usage: `websocketclient hostname:port input_file_path.json`" << std::endl;
-        exit(0);
+        return 0;
     }
     
     try {
@@ -56,6 +56,7 @@ int main(int argc, char* argv[]) {
         
     } catch (std::exception& e) {
         std::cerr << "Exception: " << e.what() << std::endl;
+        return 1;
     }
     
     return 0;

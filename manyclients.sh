@@ -4,7 +4,11 @@ T="$(date +%s)"
 FAIL=0
 for (( i = 0; i <= $1 ; i++ ))
 do
-    ./websocketclient $2 $3 > /dev/null &
+    if [ $4 ]; then
+        ./websocketclient $2 $3 &
+    else
+        ./websocketclient $2 $3 > /dev/null &
+    fi
 done
 for job in `jobs -p`
 do

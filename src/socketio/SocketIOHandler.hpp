@@ -1,5 +1,6 @@
 #ifndef SOCKET_IO_HANDLER
 #define SOCKET_IO_HANDLER
+#define BOOST_NETWORK_HTTP_CLIENT_DEFAULT_TAG tags::http_default_8bit_tcp_resolve
 
 #include <websocketpp/roles/client.hpp>
 #include <websocketpp/websocketpp.hpp>

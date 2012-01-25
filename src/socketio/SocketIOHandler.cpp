@@ -17,7 +17,6 @@ namespace socketio {
     
     void SocketIOHandler::loadToken() {
         _websocket_token = _get_token(_host);
-        std::cout << "got token: " << _websocket_token << std::endl;
     }
     
     std::string SocketIOHandler::_get_token(const std::string &host) {
@@ -27,14 +26,9 @@ namespace socketio {
         http::client http_client;
         http::client::request http_request = http::client::request(socketio_token_url.str());
         http_request << header("Connection", "close");
-        
-        std::cout << "starting request for " << socketio_token_url.str() << std::endl;
         http::client::response http_request_response = http_client.get(http_request);
-        std::cout << "got " << socketio_token_url.str() << std::endl;
         std::string socket_io_key = body(http_request_response);
-        std::cout << "getting body: " << socket_io_key << std::endl;
         int first_colon = socket_io_key.find_first_of(":");
-        std::cout << "got index of first colon: " << first_colon << std::endl;
         return socket_io_key.substr(0, first_colon);
     }
     
@@ -88,8 +82,10 @@ namespace socketio {
                 
                 con->send(formatted_message.str(), websocketpp::frame::opcode::TEXT);
             } else {
-                con->close(websocketpp::close::status::NORMAL, "End of test sequence");
+                con->close(websocketpp::close::status::NORMAL, "End of test sequence ++++++++++++++++++++++++++++++++");
             }
+        } else {
+            std::cout << "message received: " << payload << std::endl;
         }
     }
     
@@ -108,6 +104,7 @@ namespace socketio {
     
     void SocketIOHandler::on_fail(connection_ptr con) {
         std::cout << "connection failed" << std::endl;
+        exit(1);
     }
 
 }
