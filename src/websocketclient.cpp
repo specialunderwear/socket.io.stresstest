@@ -5,7 +5,6 @@
 
 #include "socketio/SocketIOHandler.hpp"
 #include "sequence/ActionSequence.hpp"
-
 using websocketpp::client;
 
 void setlogging(client &endpoint) {
@@ -28,26 +27,33 @@ int main(int argc, char* argv[]) {
         uri = argv[1];
         input_file = argv[2];
     } else {
-        std::cout << "Usage: `websocketclient hostname:port input_file_path.json`" << std::endl;
+        std::cout << "Usage: `websocketclient (http|https)://hostname:port input_file_path.json`" << std::endl;
         return 0;
     }
     
     try {
+        // load action sequence from input file.
         sequence::ActionSequence actions = sequence::ActionSequence(input_file);
+        // instantiate socketio handler with uri and action sequence
         socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri, actions);
+        // load socketio session token
         socket_io_handler->loadToken();
         
+        // print out full websocket uri including loaded token.
         std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
 
+        // set up websocket endpoint with socketio handler.
         client::handler::ptr handler(socket_io_handler);
         client::connection_ptr con;
         client endpoint(handler);
         
         setlogging(endpoint);
         
+        // prepare websocket connection.
         con = endpoint.connect(socket_io_handler->websocket_uri());
         con->add_request_header("User Agent","WebSocket++/0.2.0");
         
+        // start ioloop.
         endpoint.run();
         
         //std::cout << "case count: " << boost::dynamic_pointer_cast<echo_client_handler>(handler)->m_case_count << std::endl;

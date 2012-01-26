@@ -12,9 +12,12 @@ namespace socketio {
     using namespace boost::network;
     using boost::asio::ip::tcp;
 
-    SocketIOHandler::SocketIOHandler(const std::string &host, sequence::ActionSequence &action_sequence)
+    SocketIOHandler::SocketIOHandler(const std::string &uri, sequence::ActionSequence &action_sequence)
     :client::handler() {
-        _host = host;
+        int protocol_start = uri.find_first_of("://");
+        _host = std::string(uri.begin() + protocol_start + 3, uri.end());
+        // if protocol length is 5 it is https.
+        _is_secure = protocol_start == 5;
         _actions = action_sequence;
         heartbeat = 0;
     }
@@ -93,7 +96,7 @@ namespace socketio {
         
     std::string SocketIOHandler::_get_token(const std::string &host) {
         std::stringstream socketio_token_url;
-        socketio_token_url << "http://" << host << "/socket.io/1/?t=" << random();
+        socketio_token_url << (_is_secure ? "https://" : "http://") << host << "/socket.io/1/?t=" << random();
 
         http::client http_client;
         http::client::request http_request = http::client::request(socketio_token_url.str());

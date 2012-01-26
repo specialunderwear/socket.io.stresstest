@@ -1,5 +1,7 @@
 #ifndef SOCKET_IO_HANDLER
 #define SOCKET_IO_HANDLER
+
+#define BOOST_NETWORK_ENABLE_HTTPS 1
 #define BOOST_NETWORK_HTTP_CLIENT_DEFAULT_TAG tags::http_default_8bit_tcp_resolve
 #define SOCKET_IO_HEARTBEAT_INTERVAL 25
 
@@ -15,12 +17,13 @@ namespace socketio {
     class SocketIOHandler : public client::handler, public boost::enable_shared_from_this<SocketIOHandler> {
     private:
         std::string sessionid;
+        bool _is_secure;
         std::string _host;
         std::string _websocket_token;
         sequence::ActionSequence _actions;
         boost::asio::deadline_timer *heartbeat;
 
-        std::string _get_token(const std::string &host);
+        std::string _get_token(const std::string &uri);
         std::string _parse_session_id(const std::string &message);
         void _log_message(const std::string &message, const boost::format &next_message);
         void _reset_heartbeat(connection_ptr con);
