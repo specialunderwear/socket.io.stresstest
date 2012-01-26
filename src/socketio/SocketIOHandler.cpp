@@ -4,22 +4,93 @@
 #include <boost/format.hpp>
 #include <boost/asio.hpp>
 #include <json/json.h>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 namespace socketio {
     
     using websocketpp::client;
     using namespace boost::network;
-    
+    using boost::asio::ip::tcp;
+
     SocketIOHandler::SocketIOHandler(const std::string &host, sequence::ActionSequence &action_sequence)
     :client::handler() {
         _host = host;
         _actions = action_sequence;
+        heartbeat = 0;
+    }
+    
+    SocketIOHandler::~SocketIOHandler() {
+        if(heartbeat) {
+            delete heartbeat;
+        }
     }
     
     void SocketIOHandler::loadToken() {
         _websocket_token = _get_token(_host);
     }
+
+    std::string SocketIOHandler::websocket_uri() const {
+        std::stringstream websocket_uri;
+        websocket_uri << "ws://" << _host << "/socket.io/1/websocket/" << _websocket_token;
+        return websocket_uri.str();
+    }
     
+    /* Callbacks */
+    
+    void SocketIOHandler::on_message(connection_ptr con, message_ptr msg) {
+        _reset_heartbeat(con);
+
+        std::string payload = msg->get_payload();
+        if (payload.substr(0, 3) == "5::") {
+            if (sessionid.empty()) {
+                sessionid = _parse_session_id(payload);
+            }
+            
+            std::string next_message = _actions.nextAction();
+            if (next_message != "stop") {
+                boost::format formatted_message = boost::format(next_message);
+                formatted_message.exceptions(boost::io::all_error_bits ^ ( boost::io::too_many_args_bit | boost::io::too_few_args_bit ));
+                formatted_message = formatted_message % sessionid;
+
+                _log_message(payload, formatted_message);
+                
+                con->send(formatted_message.str(), websocketpp::frame::opcode::TEXT);
+            } else {
+                con->close(websocketpp::close::status::NORMAL, "End of test sequence ++++++++++++++++++++++++++++++++");
+            }
+        } else {
+            std::cout << "message received: " << payload << std::endl;
+        }
+    }
+    
+    void SocketIOHandler::on_close(connection_ptr connection) {
+        std::cout << "connection closed." << std::endl;
+        heartbeat->cancel();
+    };
+
+    void SocketIOHandler::on_open(connection_ptr con) {
+        std::cout << "connection opened." << std::endl;
+        
+        // turn on keep alive.
+        boost::asio::socket_base::keep_alive keepAlive(true);
+        con->get_socket().set_option(keepAlive);
+        
+        // since keep alive only pings after 2 hours, also check the socket every SOCKET_IO_HEARTBEAT_INTERVAL
+        // if no message was reveived within that time span, a 2:: will be sent to the server to check to socket.
+        heartbeat = new boost::asio::deadline_timer(con->get_io_service(), boost::posix_time::seconds(SOCKET_IO_HEARTBEAT_INTERVAL));
+        _reset_heartbeat(con);
+        
+        // run first action
+        con->send(_actions.nextAction(), websocketpp::frame::opcode::TEXT);
+    };
+    
+    void SocketIOHandler::on_fail(connection_ptr con) {
+        std::cerr << "connection failed" << std::endl;
+        exit(1);
+    }
+    
+    /* Private */
+        
     std::string SocketIOHandler::_get_token(const std::string &host) {
         std::stringstream socketio_token_url;
         socketio_token_url << "http://" << host << "/socket.io/1/?t=" << random();
@@ -53,6 +124,25 @@ namespace socketio {
         }
         return root;
     }
+    
+    void SocketIOHandler::_reset_heartbeat(connection_ptr con) {
+        heartbeat->expires_from_now(boost::posix_time::seconds(SOCKET_IO_HEARTBEAT_INTERVAL));
+        heartbeat->async_wait(
+            boost::bind(
+                &SocketIOHandler::_on_heartbeat_timeout,
+                shared_from_this(),
+                con->shared_from_this(),
+                boost::asio::placeholders::error
+            )
+        );
+    }
+    
+    void SocketIOHandler::_on_heartbeat_timeout(connection_ptr con, const boost::system::error_code& error) {
+        if (!error) {
+            con->send("2::", websocketpp::frame::opcode::TEXT);
+        }
+    }
+
     std::string SocketIOHandler::_parse_session_id(const std::string &message) {
         Json::Value root = _parse_message(message);
         return root["args"][0]["SessionID"].asString();
@@ -66,52 +156,4 @@ namespace socketio {
         std::cout << ((next_message.str().size() > 4) ? writer.write(_parse_message(next_message.str())) : next_message.str()) << std::endl;
         std::cout << std::endl;
     }
-    
-    std::string SocketIOHandler::websocket_uri() const {
-        std::stringstream websocket_uri;
-        websocket_uri << "ws://" << _host << "/socket.io/1/websocket/" << _websocket_token;
-        return websocket_uri.str();
-    }
-    
-    void SocketIOHandler::on_message(connection_ptr con, message_ptr msg) {
-        std::string payload = msg->get_payload();
-        if (payload.substr(0, 3) == "5::") {
-            if (sessionid.empty()) {
-                sessionid = _parse_session_id(payload);
-            }
-            
-            std::string next_message = _actions.nextAction();
-            if (next_message != "stop") {
-                boost::format formatted_message = boost::format(next_message);
-                formatted_message.exceptions(boost::io::all_error_bits ^ ( boost::io::too_many_args_bit | boost::io::too_few_args_bit ));
-                formatted_message = formatted_message % sessionid;
-
-                _log_message(payload, formatted_message);
-                
-                con->send(formatted_message.str(), websocketpp::frame::opcode::TEXT);
-            } else {
-                con->close(websocketpp::close::status::NORMAL, "End of test sequence ++++++++++++++++++++++++++++++++");
-            }
-        } else {
-            std::cout << "message received: " << payload << std::endl;
-        }
-    }
-    
-    void SocketIOHandler::on_close(connection_ptr connection) {
-        std::cout << "connection closed." << std::endl;
-    };
-
-    void SocketIOHandler::on_open(connection_ptr con) {
-        std::cout << "connection opened." << std::endl;
-        boost::asio::socket_base::keep_alive keepAlive(true);
-        con->get_socket().set_option(keepAlive);
-        //con->get_io_service().set_option(keepAlive);
-        con->send(_actions.nextAction(), websocketpp::frame::opcode::TEXT);
-    };
-    
-    void SocketIOHandler::on_fail(connection_ptr con) {
-        std::cerr << "connection failed" << std::endl;
-        exit(1);
-    }
-
 }
