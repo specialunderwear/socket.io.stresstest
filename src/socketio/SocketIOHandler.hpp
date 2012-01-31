@@ -1,5 +1,5 @@
-#ifndef SOCKET_IO_HANDLER
-#define SOCKET_IO_HANDLER
+#ifndef SOCKET_IO_Handler
+#define SOCKET_IO_Handler
 
 #define BOOST_NETWORK_ENABLE_HTTPS 1
 #define BOOST_NETWORK_HTTP_CLIENT_DEFAULT_TAG tags::http_default_8bit_tcp_resolve
@@ -25,8 +25,9 @@ using websocketpp::client_tls;
 namespace socketio {
 
     using namespace boost::network;
-     
-    class SocketIOHandler : public client_tls::handler, public boost::enable_shared_from_this<SocketIOHandler> {
+		
+	template <class Handler>
+    class SocketIOHandler : public Handler, public boost::enable_shared_from_this<SocketIOHandler<Handler> > {
     private:
         std::string sessionid;
         bool _is_secure;
@@ -69,19 +70,19 @@ namespace socketio {
 	        return root;
 	    }
 		
-	    void _reset_heartbeat(connection_ptr con) {
+	    void _reset_heartbeat(typename Handler::connection_ptr con) {
 	        heartbeat->expires_from_now(boost::posix_time::seconds(SOCKET_IO_HEARTBEAT_INTERVAL));
 	        heartbeat->async_wait(
 	            boost::bind(
 	                &SocketIOHandler::_on_heartbeat_timeout,
-	                shared_from_this(),
+	                this->shared_from_this(),
 	                con->shared_from_this(),
 	                boost::asio::placeholders::error
 	            )
 	        );
 	    }
 		
-	    void _on_heartbeat_timeout(connection_ptr con, const boost::system::error_code& error) {
+	    void _on_heartbeat_timeout(typename Handler::connection_ptr con, const boost::system::error_code& error) {
 	        if (!error) {
 	            con->send("2::", websocketpp::frame::opcode::TEXT);
 	        }
@@ -116,7 +117,7 @@ namespace socketio {
 		 */
 
 	    SocketIOHandler(const std::string &uri, sequence::ActionSequence &action_sequence)
-	    :client_tls::handler() {
+	    :Handler() {
 	        int protocol_start = uri.find_first_of("://");
 	        _host = std::string(uri.begin() + protocol_start + 3, uri.end());
 	        // if protocol length is 5 it is https.
@@ -158,10 +159,10 @@ namespace socketio {
 	    }
  	   	
 		//---------------------------------------
-		// EVENT HANDLERS
+		// EVENT HandlerS
 		//---------------------------------------
 		
-	    void on_message(connection_ptr con, message_ptr msg) {
+	    void on_message(typename Handler::connection_ptr con, typename Handler::message_ptr msg) {
 	        _reset_heartbeat(con);
 
 	        std::string payload = msg->get_payload();
@@ -187,12 +188,12 @@ namespace socketio {
 	        }
 	    }
         
-        virtual void on_close(connection_ptr connection) {
+        virtual void on_close(typename Handler::connection_ptr connection) {
 	        std::cout << "connection closed." << std::endl;
 	        heartbeat->cancel();
 	    };
 
-        virtual void on_open(connection_ptr con) {
+        virtual void on_open(typename Handler::connection_ptr con) {
 	        std::cout << "connection opened." << std::endl;
 
 	        // turn on keep alive.
@@ -208,7 +209,7 @@ namespace socketio {
 	        con->send(_actions.nextAction(), websocketpp::frame::opcode::TEXT);
 	    };
  
-        virtual void on_fail(connection_ptr con) {
+        virtual void on_fail(typename Handler::connection_ptr con) {
 	        std::cerr << "connection failed" << std::endl;
 	        exit(1);
 	    }

@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
         // load action sequence from input file.
         sequence::ActionSequence actions = sequence::ActionSequence(input_file);
         // instantiate socketio handler with uri and action sequence
-        socketio::SocketIOHandler *socket_io_handler = new socketio::SocketIOHandler(uri, actions);
+        socketio::SocketIOHandler<client_tls::handler> *socket_io_handler = new socketio::SocketIOHandler<client_tls::handler>(uri, actions);
         // load socketio session token
         socket_io_handler->loadToken();
         
