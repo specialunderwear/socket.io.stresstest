@@ -89,17 +89,14 @@ lib/libwebsocketpp.a: $(WEBSOCKETPP_BUILD)/data.o $(WEBSOCKETPP_BUILD)/hybi_head
 # WEBSOCKETCLIENT
 #####################################
 
-build/SocketIOHandler.o: src/socketio/SocketIOHandler.cpp
-	g++ src/socketio/SocketIOHandler.cpp $(INCLUDE_DIRS) $(CFLAGS) -c -o build/SocketIOHandler.o
-
 build/websocketclient.o: src/websocketclient.cpp
 	g++ src/websocketclient.cpp $(INCLUDE_DIRS) $(CFLAGS) -c -o build/websocketclient.o
 
 build/ActionSequence.o: src/sequence/ActionSequence.cpp
 	g++ src/sequence/ActionSequence.cpp $(INCLUDE_DIRS) $(CFLAGS) -c -o build/ActionSequence.o
 
-websocketclient: build/websocketclient.o build/SocketIOHandler.o build/ActionSequence.o libs
-	g++ -o websocketclient $(LD_PATH) build/websocketclient.o build/SocketIOHandler.o build/ActionSequence.o -lwebsocketpp -lnetlib -ljsoncpp -lboost_system -lboost_thread -lboost_date_time -lboost_regex -lboost_random -lboost_program_options -pthread -lssl -lcrypto
+websocketclient: build/websocketclient.o build/ActionSequence.o libs
+	g++ -o websocketclient $(LD_PATH) build/websocketclient.o build/ActionSequence.o -lwebsocketpp -lnetlib -ljsoncpp -lboost_system -lboost_thread -lboost_date_time -lboost_regex -lboost_random -lboost_program_options -pthread -lssl -lcrypto
 	strip websocketclient
 
 .PHONY : clean
