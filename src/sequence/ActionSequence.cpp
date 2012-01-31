@@ -1,3 +1,6 @@
+#ifndef ACTION_SEQUENCE_CPP
+#define ACTION_SEQUENCE_CPP
+
 #include "ActionSequence.hpp"
 #include <fstream>
 
@@ -27,3 +30,5 @@ namespace sequence {
     }
 
 }
+
+#endif

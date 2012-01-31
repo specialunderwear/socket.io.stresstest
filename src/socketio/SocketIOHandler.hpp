@@ -1,5 +1,5 @@
-#ifndef SOCKET_IO_Handler
-#define SOCKET_IO_Handler
+#ifndef SOCKET_IO_HANDLER_HPP
+#define SOCKET_IO_HANDLER_HPP
 
 #define BOOST_NETWORK_ENABLE_HTTPS 1
 #define BOOST_NETWORK_HTTP_CLIENT_DEFAULT_TAG tags::http_default_8bit_tcp_resolve
@@ -214,8 +214,8 @@ namespace socketio {
 	        exit(1);
 	    }
  
-        virtual boost::shared_ptr<boost::asio::ssl::context> on_tls_init(boost::asio::io_service &io_service) {
-	        boost::asio::ssl::context *ctx = new boost::asio::ssl::context(io_service, boost::asio::ssl::context::sslv23_client);
+        virtual boost::shared_ptr<boost::asio::ssl::context> on_tls_init() {
+	        boost::asio::ssl::context *ctx = new boost::asio::ssl::context(boost::asio::ssl::context::sslv23_client);
 	        ctx->set_verify_mode(boost::asio::ssl::context::verify_none);
 			boost::shared_ptr<boost::asio::ssl::context> p(ctx);
 			return p;

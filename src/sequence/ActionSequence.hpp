@@ -1,9 +1,10 @@
-#ifndef ACTION_SEQUENCE
-#define ACTION_SEQUENCE
+#ifndef ACTION_SEQUENCE_HPP
+#define ACTION_SEQUENCE_HPP
 #include <string>
 #include <json/json.h>
 
 namespace sequence {
+
     class ActionSequence {
         unsigned int _lastIndex;
         Json::Value _actions;
