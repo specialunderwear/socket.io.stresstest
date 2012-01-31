@@ -9,7 +9,7 @@
 using websocketpp::client;
 using websocketpp::client_tls;
 
-void setlogging(client &endpoint) {
+void setlogging(client_tls &endpoint) {
 #if DEBUG
     endpoint.alog().set_level(websocketpp::log::alevel::ALL);
     endpoint.elog().set_level(websocketpp::log::alevel::ALL);
@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
         client_tls::connection_ptr con;
         client_tls endpoint(handler);
         
-        // setlogging(endpoint);
+        setlogging(endpoint);
         
         // prepare websocket connection.
         con = endpoint.connect(socket_io_handler->websocket_uri());
