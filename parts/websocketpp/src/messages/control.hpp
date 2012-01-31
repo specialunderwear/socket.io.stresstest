@@ -61,30 +61,46 @@ public:
             throw processor::exception("Message payload was too large.",processor::error::MESSAGE_TOO_BIG);
         }
         
-        for (i = 0; i < size; ++i) {
+        i = 0;
+        while(input.good() && i < size) {
+            c = input.get();
+            
             if (input.good()) {
-               c = input.get(); 
-            } else if (input.eof()) {
-                break;
-            } else {
-                // istream read error? throw?
-                 throw processor::exception("istream read error",processor::error::FATAL_ERROR);
-            }
-            if (input.good()) {
-                // process c
                 if (m_masking_index >= 0) {
                     c = c ^ m_masking_key[(m_masking_index++)%4];
                 }
                 
-                // add c to payload 
                 m_payload.push_back(c);
+                i++;
             } else if (input.eof()) {
                 break;
             } else {
-                // istream read error? throw?
-                throw processor::exception("istream read error",processor::error::FATAL_ERROR);
+                throw processor::exception("istream read error 2",
+                                           processor::error::FATAL_ERROR);
             }
         }
+        
+        /*for (i = 0; i < size; ++i) {
+            if (input.good()) {
+                c = input.get();
+               
+                if (input.fail()) {
+                    throw processor::exception("istream read error",
+                                               processor::error::FATAL_ERROR);
+                }
+                
+                if (m_masking_index >= 0) {
+                    c = c ^ m_masking_key[(m_masking_index++)%4];
+                }
+                
+                m_payload.push_back(c);
+               
+            } else if (input.eof()) {
+                break;
+            } else {
+                 throw processor::exception("istream read error",processor::error::FATAL_ERROR);
+            }
+        }*/
         
         // successfully read all bytes
         return i;

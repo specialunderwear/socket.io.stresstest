@@ -62,26 +62,43 @@ uint64_t data::process_payload(std::istream& input,uint64_t size) {
         ));
     }
     
-    for (i = 0; i < size; ++i) {
-        if (input.good()) {
-            c = input.get();
-        } else if (input.eof()) {
-            break;
-        } else {
-            // istream read error? throw?
-            throw processor::exception("istream read error",
-                                       processor::error::FATAL_ERROR);
-        }
+    // extract characters until size have been extracted or eof. return num ext
+    i = 0;
+    while(input.good() && i < size) {
+        c = input.get();
+        
         if (input.good()) {
             process_character(c);
+            i++;
         } else if (input.eof()) {
             break;
         } else {
-            // istream read error? throw?
-            throw processor::exception("istream read error",
+            throw processor::exception("istream read error 2",
                                        processor::error::FATAL_ERROR);
         }
     }
+    
+    /*for (i = 0; i < size; ++i) {
+        if (input.good()) {
+            c = input.get();
+            process_character(c);
+            
+            if (input.eof()) {
+                break;
+            }
+            
+            if (input.fail()) {
+                throw processor::exception("istream read error 1",
+                                           processor::error::FATAL_ERROR);
+            }
+            
+        } else if (input.eof()) {
+            break;
+        } else {
+            throw processor::exception("istream read error 2",
+                                       processor::error::FATAL_ERROR);
+        }
+    }*/
     
     // successfully read all bytes
     return i;
@@ -117,6 +134,7 @@ void data::complete() {
             throw processor::exception("Invalid UTF8 data",processor::error::PAYLOAD_VIOLATION);
         }
     }
+    
 }
 
 void data::validate_payload() {
@@ -141,7 +159,7 @@ void data::set_prepared(bool b) {
 }
 
 bool data::get_prepared() const {
-    return m_prepared;
+    return m_prepared; 
 }
 
 // This could be further optimized using methods that write directly into the

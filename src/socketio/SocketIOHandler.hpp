@@ -5,16 +5,17 @@
 #define BOOST_NETWORK_HTTP_CLIENT_DEFAULT_TAG tags::http_default_8bit_tcp_resolve
 #define SOCKET_IO_HEARTBEAT_INTERVAL 25
 
+#include <websocketpp/sockets/tls.hpp>
 #include <websocketpp/roles/client.hpp>
 #include <websocketpp/websocketpp.hpp>
 #include "../sequence/ActionSequence.hpp"
 #include <boost/enable_shared_from_this.hpp>
 
-using websocketpp::client;
+using websocketpp::client_tls;
 
 namespace socketio {
     
-    class SocketIOHandler : public client::handler, public boost::enable_shared_from_this<SocketIOHandler> {
+    class SocketIOHandler : public client_tls::handler, public boost::enable_shared_from_this<SocketIOHandler> {
     private:
         std::string sessionid;
         bool _is_secure;
@@ -37,6 +38,7 @@ namespace socketio {
         virtual void on_close(connection_ptr connection);
         virtual void on_open(connection_ptr con);
         virtual void on_fail(connection_ptr con);
+        virtual boost::shared_ptr<boost::asio::ssl::context> on_tls_init(boost::asio::io_service &io_service);
     };
 
 }

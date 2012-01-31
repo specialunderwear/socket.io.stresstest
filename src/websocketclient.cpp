@@ -1,11 +1,13 @@
 #include <iostream>
 
+#include <websocketpp/sockets/tls.hpp>
 #include <websocketpp/roles/client.hpp>
 #include <websocketpp/websocketpp.hpp>
 
 #include "socketio/SocketIOHandler.hpp"
 #include "sequence/ActionSequence.hpp"
 using websocketpp::client;
+using websocketpp::client_tls;
 
 void setlogging(client &endpoint) {
 #if DEBUG
@@ -43,11 +45,11 @@ int main(int argc, char* argv[]) {
         std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
 
         // set up websocket endpoint with socketio handler.
-        client::handler::ptr handler(socket_io_handler);
-        client::connection_ptr con;
-        client endpoint(handler);
+        client_tls::handler::ptr handler(socket_io_handler);
+        client_tls::connection_ptr con;
+        client_tls endpoint(handler);
         
-        setlogging(endpoint);
+        // setlogging(endpoint);
         
         // prepare websocket connection.
         con = endpoint.connect(socket_io_handler->websocket_uri());

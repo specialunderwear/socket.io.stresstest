@@ -8,7 +8,7 @@ WEBSOCKETPP_BUILD = build/websocketpp
 INCLUDE_DIRS = -Iinclude
 LD_PATH = -Llib
 
-CFLAGS = -O2 -Wall -DDEBUG=0 -Bstatic
+CFLAGS = -g -Wall -DDEBUG=1 -Bstatic
 
 all: websocketclient
 
@@ -88,6 +88,7 @@ lib/libwebsocketpp.a: $(WEBSOCKETPP_BUILD)/data.o $(WEBSOCKETPP_BUILD)/hybi_head
 #####################################
 # WEBSOCKETCLIENT
 #####################################
+
 build/SocketIOHandler.o: src/socketio/SocketIOHandler.cpp
 	g++ src/socketio/SocketIOHandler.cpp $(INCLUDE_DIRS) $(CFLAGS) -c -o build/SocketIOHandler.o
 

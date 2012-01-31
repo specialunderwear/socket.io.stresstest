@@ -13,7 +13,7 @@ namespace socketio {
     using boost::asio::ip::tcp;
 
     SocketIOHandler::SocketIOHandler(const std::string &uri, sequence::ActionSequence &action_sequence)
-    :client::handler() {
+    :client_tls::handler() {
         int protocol_start = uri.find_first_of("://");
         _host = std::string(uri.begin() + protocol_start + 3, uri.end());
         // if protocol length is 5 it is https.
@@ -34,7 +34,7 @@ namespace socketio {
 
     std::string SocketIOHandler::websocket_uri() const {
         std::stringstream websocket_uri;
-        websocket_uri << "ws://" << _host << "/socket.io/1/websocket/" << _websocket_token;
+        websocket_uri << (_is_secure ? "wss://" : "ws://") << _host << "/socket.io/1/websocket/" << _websocket_token;
         return websocket_uri.str();
     }
     
@@ -73,10 +73,10 @@ namespace socketio {
 
     void SocketIOHandler::on_open(connection_ptr con) {
         std::cout << "connection opened." << std::endl;
-        
+
         // turn on keep alive.
-        boost::asio::socket_base::keep_alive keepAlive(true);
-        con->get_socket().set_option(keepAlive);
+        //boost::asio::socket_base::keep_alive keepAlive(true);
+        //con->get_socket().set_option(keepAlive);
         
         // since keep alive only pings after 2 hours, also check the socket every SOCKET_IO_HEARTBEAT_INTERVAL
         // if no message was reveived within that time span, a 2:: will be sent to the server to check to socket.
@@ -90,6 +90,13 @@ namespace socketio {
     void SocketIOHandler::on_fail(connection_ptr con) {
         std::cerr << "connection failed" << std::endl;
         exit(1);
+    }
+    
+    boost::shared_ptr<boost::asio::ssl::context> SocketIOHandler::on_tls_init(boost::asio::io_service &io_service) {
+        boost::asio::ssl::context *ctx = new boost::asio::ssl::context(io_service, boost::asio::ssl::context::sslv23_client);
+        ctx->set_verify_mode(boost::asio::ssl::context::verify_none);
+		boost::shared_ptr<boost::asio::ssl::context> p(ctx);
+		return p;
     }
     
     /* Private */
