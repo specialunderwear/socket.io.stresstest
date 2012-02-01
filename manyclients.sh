@@ -48,7 +48,7 @@ do
 	sleep $SLEEP
     fi
 done
-echo "Done spawning processes in $(($(date +%s)-T)) seconds"
+echo -en "\033[1;31mDone spawning processes in $(($(date +%s)-T)) seconds"
 echo "Waiting for completion now ..."
 WAIT=0
 for job in $PIDLIST
