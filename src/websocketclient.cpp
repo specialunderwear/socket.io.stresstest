@@ -20,6 +20,19 @@
 using websocketpp::client;
 using websocketpp::client_tls;
 
+template <typename CLIENT_TYPE>
+void connect_and_run(std::string &uri, sequence::ActionSequence &actions) {
+    socketio::SocketIOHandler<typename CLIENT_TYPE::handler> *socket_io_handler = new socketio::SocketIOHandler<typename CLIENT_TYPE::handler>(uri, actions);
+    socket_io_handler->loadToken();
+    std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
+    typename CLIENT_TYPE::handler::ptr handler(socket_io_handler);
+    CLIENT_TYPE endpoint(handler);
+    endpoint.alog().LOGLEVEL();
+    endpoint.elog().LOGLEVEL();
+    typename CLIENT_TYPE::connection_ptr con = endpoint.connect(socket_io_handler->websocket_uri());
+    con->add_request_header("User Agent","WebSocket++/0.2.0");
+    endpoint.run();
+}
 
 int main(int argc, char* argv[]) {
     srandom(time(0));
@@ -29,11 +42,10 @@ int main(int argc, char* argv[]) {
     
     if (argc == 3) {
         uri = argv[1];
+        // strip trailing slash
         std::string::iterator it = uri.end() - 1;
-        if (*it == '/')
-        {
-             uri.erase(it);
-        }
+        if (*it == '/') uri.erase(it);
+        
         std::cout << uri << std::endl;
         input_file = argv[2];
     } else {
@@ -45,34 +57,10 @@ int main(int argc, char* argv[]) {
         // load action sequence from input file.
         sequence::ActionSequence actions = sequence::ActionSequence(input_file);
         
-        /*
-        This code seems like duplicated.
-        It's not, there is no way to get a handle to any of the below referenced types that can be used
-        in both the ssl and non-ssl case, because all these types are inner classes. So they are all different
-        and this code is needed.
-        */
         if (boost::starts_with(uri, "https://")) {
-            socketio::SocketIOHandler<client_tls::handler> *socket_io_handler = new socketio::SocketIOHandler<client_tls::handler>(uri, actions);
-            socket_io_handler->loadToken();
-            std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
-            client_tls::handler::ptr handler(socket_io_handler);
-            client_tls endpoint(handler);
-            endpoint.alog().LOGLEVEL();
-            endpoint.elog().LOGLEVEL();
-            client_tls::connection_ptr con = endpoint.connect(socket_io_handler->websocket_uri());
-            con->add_request_header("User Agent","WebSocket++/0.2.0");
-            endpoint.run();
+            connect_and_run<client_tls>(uri, actions);
         } else if (boost::starts_with(uri, "http://")) {
-            socketio::SocketIOHandler<client::handler> *socket_io_handler = new socketio::SocketIOHandler<client::handler>(uri, actions);
-            socket_io_handler->loadToken();
-            std::cout << "websocket_uri " << socket_io_handler->websocket_uri() << std::endl;
-            client::handler::ptr handler(socket_io_handler);
-            client endpoint(handler);
-            endpoint.alog().LOGLEVEL();
-            endpoint.elog().LOGLEVEL();
-            client::connection_ptr con = endpoint.connect(socket_io_handler->websocket_uri());
-            con->add_request_header("User Agent","WebSocket++/0.2.0");
-            endpoint.run();
+            connect_and_run<client>(uri, actions);
         } else {
             std::cout << USAGE << std::endl;
             return 0;
