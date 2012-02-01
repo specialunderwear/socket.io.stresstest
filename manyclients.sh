@@ -1,24 +1,57 @@
 #! /bin/bash
-echo "Spawning $1 processes"
-T="$(date +%s)"
+
 FAIL=0
-pidlist=""
-for (( i = 0; i <= $1 ; i++ ))
+VERBOSE=0
+SLEEP="0.01"
+
+# parse options
+while getopts "vw:d" opt; do
+  case $opt in
+    v)
+      VERBOSE=1
+      ;;
+    w)
+      SLEEP=$OPTARG
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+# remove option from args
+shift $(($OPTIND - 1))
+
+# warn if not enough args
+if [ $# != 3 ]; then
+    echo "Usage manyclients.sh [-v] [-w seconds] 100 http(s)://host/ inputfile"
+    exit
+fi
+
+echo "Spawning $1 processes, waiting for $SLEEP seconds between spawns."
+
+T="$(date +%s)"
+for (( i = 0; i < $1 ; i++ ))
 do
-    if [ $4 ]; then
+    if [ $VERBOSE != "0" ]; then
         ./websocketclient $2 $3 &
-	pidlist="$pidlist $!"
-	sleep 0.001s
+	PIDLIST="$PIDLIST $!"
+	sleep $SLEEP
     else
         ./websocketclient $2 $3 > /dev/null &
-	pidlist="$pidlist $!"
-	sleep 0.001s
+	PIDLIST="$PIDLIST $!"
+	sleep $SLEEP
     fi
 done
 echo "Done spawning processes in $(($(date +%s)-T)) seconds"
 echo "Waiting for completion now ..."
 WAIT=0
-for job in $pidlist
+for job in $PIDLIST
 do
     let WAIT+=1
     wait $job || let "FAIL+=1"
