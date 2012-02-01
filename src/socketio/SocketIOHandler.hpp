@@ -196,13 +196,13 @@ namespace socketio {
         virtual void on_open(typename Handler::connection_ptr con) {
 	        std::cout << "connection opened." << std::endl;
 
-	        // turn on keep alive.
-			boost::asio::socket_base::keep_alive keepAlive(true);
-			if (_is_secure) {
-				con->get_socket()->next_layer().set_option(keep_alive);
-			} else {
-				con->get_socket().set_option(keepAlive);
-			}
+	        // turn on keep alive (doesn't work because this is a class ...)
+			// boost::asio::socket_base::keep_alive keepAlive(true);
+			// if (_is_secure) {
+			// 	con->get_socket().next_layer().set_option(keep_alive);
+			// } else {
+			// 	con->get_socket().set_option(keepAlive);
+			// }
         
 	        // since keep alive only pings after 2 hours, also check the socket every SOCKET_IO_HEARTBEAT_INTERVAL
 	        // if no message was reveived within that time span, a 2:: will be sent to the server to check to socket.
