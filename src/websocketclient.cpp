@@ -45,6 +45,12 @@ int main(int argc, char* argv[]) {
         // load action sequence from input file.
         sequence::ActionSequence actions = sequence::ActionSequence(input_file);
 		
+		/*
+		This code seems like duplicated.
+		It's not, there is no way to get a handle to any of the below referenced types that can be used
+		in both the ssl and non-ssl case, because all these types are inner classes. So they are all different
+		and this code is needed.
+		*/
 		if (boost::starts_with(uri, "https://")) {
 	        socketio::SocketIOHandler<client_tls::handler> *socket_io_handler = new socketio::SocketIOHandler<client_tls::handler>(uri, actions);
 			socket_io_handler->loadToken();
