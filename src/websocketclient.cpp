@@ -1,5 +1,4 @@
 #include <iostream>
-
 #include <boost/algorithm/string/predicate.hpp>
 
 #include <websocketpp/sockets/tls.hpp>
