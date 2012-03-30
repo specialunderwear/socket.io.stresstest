@@ -33,8 +33,8 @@ using websocketpp::server;
 
 class echo_server_handler : public server::handler {
 public:
-    void on_message(connection_ptr connection,message_ptr msg) {
-        connection->send(msg->get_payload(),msg->get_opcode());
+    void on_message(connection_ptr con, message_ptr msg) {
+        con->send(msg->get_payload(),msg->get_opcode());
     }
 };
 
@@ -57,7 +57,10 @@ int main(int argc, char* argv[]) {
         echo_endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
         echo_endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
         
-        echo_endpoint.elog().set_level(websocketpp::log::elevel::ERROR);
+        echo_endpoint.alog().set_level(websocketpp::log::alevel::CONNECT);
+        echo_endpoint.alog().set_level(websocketpp::log::alevel::DISCONNECT);
+        
+        echo_endpoint.elog().set_level(websocketpp::log::elevel::RERROR);
         echo_endpoint.elog().set_level(websocketpp::log::elevel::FATAL);
         
         std::cout << "Starting WebSocket echo server on port " << port << std::endl;

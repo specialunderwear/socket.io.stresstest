@@ -106,7 +106,7 @@ public:
         m_bytes_needed = BASIC_HEADER_LENGTH;
         m_degraded = false;
         m_payload.clear();
-        memset(m_header,0,MAX_HEADER_LENGTH);
+        std::fill(m_header,m_header+MAX_HEADER_LENGTH,0);
     }
     
     // Method invariant: One of the following must always be true even in the case 
@@ -334,12 +334,11 @@ public:
         if (get_payload_size() == 0) {
             return close::status::NO_STATUS;
         } else if (get_payload_size() >= 2) {
-            char val[2];
-            
-            val[0] = m_payload[0];
-            val[1] = m_payload[1];
-            
-            uint16_t code = ntohs(*(reinterpret_cast<uint16_t*>(&val[0])));
+            char val[2] = { m_payload[0], m_payload[1] };
+            uint16_t code;
+
+            std::copy(val,val+sizeof(code),&code);            
+            code = ntohs(code);
             
             return close::status::value(code);
         } else {
@@ -397,7 +396,7 @@ public:
             *reinterpret_cast<uint16_t*>(&m_header[BASIC_HEADER_LENGTH]) = htons(s);
         } else if (s <= limits::PAYLOAD_SIZE_JUMBO) {
             m_header[1] = BASIC_PAYLOAD_64BIT_CODE;
-            *reinterpret_cast<uint64_t*>(&m_header[BASIC_HEADER_LENGTH]) = htonll(s);
+            *reinterpret_cast<uint64_t*>(&m_header[BASIC_HEADER_LENGTH]) = zsutil::htonll(s);
         } else {
             throw processor::exception("payload size limit is 63 bits",processor::error::PROTOCOL_VIOLATION);
         }
@@ -498,7 +497,7 @@ public:
         } else if (s == BASIC_PAYLOAD_64BIT_CODE) {
             // reinterpret the second eight bytes as a 64 bit integer in 
             // network byte order. Convert to host byte order and store.
-            payload_size = ntohll(*(
+            payload_size = zsutil::ntohll(*(
                 reinterpret_cast<uint64_t*>(&m_header[BASIC_HEADER_LENGTH])
             ));
             

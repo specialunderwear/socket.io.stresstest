@@ -62,16 +62,16 @@ public:
         char key_final[16];
         
         // copy key1 into final key
-        *reinterpret_cast<uint32_t*>(&key_final[0]) = 
-            decode_client_key(request.header("Sec-WebSocket-Key1"));
+        decode_client_key(request.header("Sec-WebSocket-Key1"), &key_final[0]);
                 
         // copy key2 into final key
-        *reinterpret_cast<uint32_t*>(&key_final[4]) = 
-            decode_client_key(request.header("Sec-WebSocket-Key2"));
+        decode_client_key(request.header("Sec-WebSocket-Key2"), &key_final[4]);
                 
         // copy key3 into final key
-        memcpy(&key_final[8],request.header("Sec-WebSocket-Key3").c_str(),8);
-                
+        std::copy(request.header("Sec-WebSocket-Key3").c_str(),
+                  request.header("Sec-WebSocket-Key3").c_str()+8,
+                  &key_final[8]);
+        
         m_key3 = md5_hash_string(std::string(key_final,16));
                 
         response.add_header("Upgrade","websocket");
@@ -265,7 +265,7 @@ public:
             return;
         }
         
-        msg->set_header(std::string(0x00));
+        msg->set_header(std::string(1,0x00));
         
         msg->append_payload(std::string(1,0xFF));
         
@@ -292,7 +292,7 @@ public:
     }
     
 private:
-    uint32_t decode_client_key(const std::string& key) {
+    void decode_client_key(const std::string& key, char* result) {
         int spaces = 0;
         std::string digits = "";
         uint32_t num;
@@ -308,9 +308,12 @@ private:
         
         num = atoi(digits.c_str());
         if (spaces > 0 && num > 0) {
-            return htonl(num/spaces);
+            num = htonl(num/spaces);
+            std::copy(reinterpret_cast<char*>(&num),
+                      reinterpret_cast<char*>(&num)+4,
+                      result);
         } else {
-            return 0;
+            std::fill(result,result+4,0);
         }
     }
     

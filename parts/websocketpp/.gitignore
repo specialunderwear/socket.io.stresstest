@@ -10,6 +10,8 @@
 
 *.o
 *.so
+*.so.?
+*.so.?.?.?
 *.a
 *.dylib
 
@@ -38,3 +40,14 @@ examples/broadcast_server_tls/broadcast_server
 test/basic/perf
 
 examples/echo_server_tls/echo_server_tls
+
+examples/concurrent_server/concurrent_server
+
+examples/fuzzing_server_tls/fuzzing_server
+
+examples/wsperf/wsperf
+
+.sconsign.dblite
+
+build/
+examples/wsperf/wsperf_client

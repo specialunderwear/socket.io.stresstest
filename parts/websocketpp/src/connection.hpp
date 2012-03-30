@@ -63,7 +63,8 @@ template <
 class connection 
  : public role< connection<endpoint,role,socket> >,
    public socket< connection<endpoint,role,socket> >,
-   public boost::enable_shared_from_this< connection<endpoint,role,socket> >
+   public boost::enable_shared_from_this< connection<endpoint,role,socket> >,
+   boost::noncopyable
 {
 public:
     typedef connection_traits< connection<endpoint,role,socket> > traits;
@@ -105,103 +106,409 @@ public:
        socket_type(e),
        m_endpoint(e),
        m_handler(h),
+       m_read_threshold(e.get_read_threshold()),
+       m_silent_close(e.get_silent_close()),
        m_timer(e.endpoint_base::m_io_service,boost::posix_time::seconds(0)),
        m_state(session::state::CONNECTING),
        m_write_buffer(0),
        m_write_state(IDLE),
        m_remote_close_code(close::status::ABNORMAL_CLOSE),
-       m_read_state(READING)
+       m_read_state(READING),
+       m_strand(e.endpoint_base::m_io_service),
+       m_detached(false)
     {
         socket_type::init();
         
+        // This should go away
         m_control_message = message::control_ptr(new message::control());
     }
     
-    // SHOULD BE PROTECTED
+    /// Destroy the connection
+    ~connection() {
+        try {
+            if (m_state != session::state::CLOSED) {
+                terminate(true);
+            }
+        } catch (...) {}
+    }
+    
+    // copy/assignment constructors require C++11
+    // boost::noncopyable is being used in the meantime.
+    // connection(connection const&) = delete;
+    // connection& operator=(connection const&) = delete
+    
+    /// Start the websocket connection async read loop
+    /**
+     * Begins the connection's async read loop. First any socket level 
+     * initialization will happen (TLS handshake, etc) then the handshake and
+     * frame reads will start. 
+     * 
+     * Visibility: protected
+     * State: Should only be called once by the endpoint.
+     * Concurrency: safe as long as state is valid
+     */
     void start() {
         // initialize the socket.
         socket_type::async_init(
-            boost::bind(
+            m_strand.wrap(boost::bind(
                 &type::handle_socket_init,
                 type::shared_from_this(),
                 boost::asio::placeholders::error
-            )
+            ))
         );
     }
-    // END PROTECTED
     
-    // Valid always
+    /// Return current connection state
+    /**
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     *
+     * @return Current connection state
+     */
     session::state::value get_state() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
         return m_state;
     }
     
-    // Valid for OPEN state
-    /// convenience overload for sending a one off text message.
-    void send(const std::string& payload, frame::opcode::value op = frame::opcode::TEXT) {
-        websocketpp::message::data::ptr msg = get_control_message2();
-        
-        if (!msg) {
-            throw exception("Endpoint send queue is full",error::SEND_QUEUE_FULL);
-        }
-        if (op != frame::opcode::TEXT && op != frame::opcode::BINARY) {
-            throw exception("opcode must be either TEXT or BINARY",error::GENERIC);
-        }
-        
-        msg->reset(op);
-        msg->set_payload(payload);
-        send(msg);
-    }
-    void send(message::data_ptr msg) {
-        m_processor->prepare_frame(msg);
-        write_message(msg);
+    /// Detaches the connection from its endpoint
+    /**
+     * Called by the m_endpoint's destructor. In state DETACHED m_endpoint is
+     * no longer avaliable. The connection may stick around if the end user 
+     * application needs to read state from it (ie close reasons, etc) but no
+     * operations requring the endpoint can be performed.
+     * 
+     * Visibility: protected
+     * State: Should only be called once by the endpoint.
+     * Concurrency: safe as long as state is valid
+     */
+    void detach() {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        m_detached = true;
     }
     
-    // TODO: overloads without code or reason?
+    void send(const std::string& payload, frame::opcode::value op = frame::opcode::TEXT);
+    void send(message::data_ptr msg);
+    
+    /// Close connection
+    /**
+     * Closes the websocket connection with the given status code and reason.
+     * From state OPEN a clean connection close is initiated. From any other
+     * state the socket will be closed and the connection cleaned up.
+     * 
+     * There is no feedback directly from close. Feedback will be provided via
+     * the on_fail or on_close callbacks.
+     * 
+     * Visibility: public
+     * State: Valid from OPEN, ignored otherwise
+     * Concurrency: callable from any thread
+     *
+     * @param code Close code to send
+     * @param reason Close reason to send
+     */
     void close(close::status::value code, const std::string& reason = "") {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_detached) {return;}
+        
         if (m_state == session::state::CONNECTING) {
-            terminate(true);
+            m_endpoint.endpoint_base::m_io_service.post(
+                m_strand.wrap(boost::bind(
+                    &type::terminate,
+                    type::shared_from_this(),
+                    true
+                ))
+            );
+        } else if (m_state == session::state::OPEN) {
+            m_endpoint.endpoint_base::m_io_service.post(
+                m_strand.wrap(boost::bind(
+                    &type::send_close,
+                    type::shared_from_this(),
+                    code,
+                    reason
+                ))
+            );
         } else {
-            send_close(code, reason);
+            // in CLOSING state we are already closing, nothing to do
+            // in CLOSED state we are already closed, nothing to do
         }
     }
+    
+    /// Send Ping
+    /**
+     * Initiates a ping with the given payload.
+     * 
+     * There is no feedback directly from ping. Feedback will be provided via
+     * the on_pong or on_pong_timeout callbacks.
+     * 
+     * Visibility: public
+     * State: Valid from OPEN, ignored otherwise
+     * Concurrency: callable from any thread
+     *
+     * @param payload Payload to be used for the ping
+     */
     void ping(const std::string& payload) {
-        send_ping(payload);
-    }
-    void pong(const std::string& payload) {
-        send_pong(payload);
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::OPEN) {return;}
+        if (m_detached) {return;}
+        
+        // TODO: optimize control messages and handle case where 
+        // endpoint is out of messages
+        message::data_ptr control = get_control_message2();
+        control->reset(frame::opcode::PING);
+        control->set_payload(payload);
+        m_processor->prepare_frame(control);
+        
+        m_endpoint.endpoint_base::m_io_service.post(
+            m_strand.wrap(boost::bind(
+                &type::write_message,
+                type::shared_from_this(),
+                control
+            ))
+        );
     }
     
+    /// Send Pong
+    /**
+     * Initiates a pong with the given payload.
+     * 
+     * There is no feedback from pong.
+     * 
+     * Visibility: public
+     * State: Valid from OPEN, ignored otherwise
+     * Concurrency: callable from any thread
+     *
+     * @param payload Payload to be used for the pong
+     */
+    void pong(const std::string& payload) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::OPEN) {return;}
+        if (m_detached) {return;}
+        
+        // TODO: optimize control messages and handle case where 
+        // endpoint is out of messages
+        message::data_ptr control = get_control_message2();
+        control->reset(frame::opcode::PONG);
+        control->set_payload(payload);
+        m_processor->prepare_frame(control);
+        
+        m_endpoint.endpoint_base::m_io_service.post(
+            m_strand.wrap(boost::bind(
+                &type::write_message,
+                type::shared_from_this(),
+                control
+            ))
+        );
+    }
+    
+    /// Return send buffer size (payload bytes)
+    /**
+     * Visibility: public
+     * State: Valid from any state.
+     * Concurrency: callable from any thread
+     * 
+     * @return The current number of bytes in the outgoing send buffer.
+     */
     uint64_t buffered_amount() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         return m_write_buffer;
     }
     
-    // Valid for CLOSED state
+    /// Get Local Close Code
+    /**
+     * Returns the close code that WebSocket++ believes to be the reason the connection
+     * closed. This value may include special values otherwise not allowed on the wire
+     * such as 1006 for abnormal closure or 1015 for TLS handshake not performed.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     *
+     * @return Close code supplied by WebSocket++
+     */
     close::status::value get_local_close_code() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_local_close_code called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_local_close_code;
     }
-    utf8_string get_local_close_reason() const {
+    
+    /// Get Local Close Reason
+    /**
+     * Returns the close reason that WebSocket++ believes to be the reason the connection
+     * closed. This is almost certainly the value passed to the `close()` method.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     *
+     * @return Close reason supplied by WebSocket++
+     */
+    std::string get_local_close_reason() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_local_close_reason called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_local_close_reason;
     }
+    
+    /// Get Remote Close Code
+    /**
+     * Returns the close reason that was received over the wire from the remote peer.
+     * This method may return values that are invalid on the wire such as 1005/No close
+     * code received, 1006 abnormal closure, or 1015 Bad TLS handshake.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     *
+     * @return Close code supplied by remote endpoint
+     */
     close::status::value get_remote_close_code() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_remote_close_code called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_remote_close_code;
     }
-    utf8_string get_remote_close_reason() const {
+    
+    /// Get Remote Close Reason
+    /**
+     * Returns the close reason that was received over the wire from the remote peer.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     * 
+     * @return Close reason supplied by remote endpoint
+     */
+    std::string get_remote_close_reason() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_remote_close_reason called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_remote_close_reason;
     }
+    
+    /// Get failed_by_me
+    /**
+     * Returns whether or not the connection ending sequence was initiated by this 
+     * endpoint. Will return true when this endpoint chooses to close normally or when it
+     * discovers an error and chooses to close the connection (either forcibly or not).
+     * Will return false when the close handshake was initiated by the remote endpoint or
+     * if the TCP connection was dropped or broken prematurely.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     *
+     * @return Whether or not the connection ending sequence was initiated by this endpoint
+     */
     bool get_failed_by_me() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_failed_by_me called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_failed_by_me;
     }
+    
+    /// Get dropped_by_me
+    /**
+     * Returns whether or not the TCP connection was dropped by this endpoint.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     *
+     * @return whether or not the TCP connection was dropped by this endpoint.
+     */
     bool get_dropped_by_me() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_dropped_by_me called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_dropped_by_me;
     }
+    
+    /// Get closed_by_me
+    /**
+     * Returns whether or not the WebSocket closing handshake was initiated by this 
+     * endpoint.
+     * 
+     * Visibility: public
+     * State: Valid from CLOSED, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     * 
+     * @return Whether or not closing handshake was initiated by this endpoint
+     */
     bool get_closed_by_me() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_state != session::state::CLOSED) {
+            throw exception("get_closed_by_me called from state other than CLOSED",
+                            error::INVALID_STATE);
+        }
+        
         return m_closed_by_me;
     }
     
-    // flow control interface
+    /// Get get_data_message
+    /**
+     * Returns a pointer to an outgoing message buffer. If there are no outgoing messages
+     * available, a NO_OUTGOING_MESSAGES exception is thrown. This happens when the 
+     * endpoint has exhausted its resources dedicated to buffering outgoing messages. To 
+     * deal with this error either increase available outgoing resources or throttle back 
+     * the rate and size of outgoing messages.
+     * 
+     * Visibility: public
+     * State: Valid from OPEN, an exception is thrown otherwise
+     * Concurrency: callable from any thread
+     *
+     * @return A pointer to the message buffer
+     */
     message::data_ptr get_data_message() {
-        return m_endpoint.get_data_message();
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_detached) {
+            throw exception("get_data_message: Endpoint was destroyed",error::ENDPOINT_UNAVAILABLE);
+        }
+        
+        if (m_state != session::state::OPEN) {
+            throw exception("get_data_message called from state other than OPEN",
+                            error::INVALID_STATE);
+        }
+        
+        message::data_ptr msg = m_endpoint.get_data_message();
+        
+        if (!msg) {
+            throw exception("No outgoing messages available",error::NO_OUTGOING_MESSAGES);
+        } else {
+            return msg;
+        }
     }
+    
     
     message::data_ptr get_control_message2() {
         return m_endpoint.get_control_message();
@@ -211,23 +518,104 @@ public:
         return m_control_message;
     }
     
-    
-    // stuff about switching handlers on the fly
-    // TODO: organize more  
+    /// Set connection handler
+    /**
+     * Sets the handler that will process callbacks for this connection. The switch is
+     * processed asynchronously so set_handler will return immediately. The existing 
+     * handler will receive an on_unload callback immediately before the switch. After 
+     * on_unload returns the original handler will not receive any more callbacks from 
+     * this connection. The new handler will receive an on_load callback immediately after
+     * the switch and before any other callbacks are processed.
+     * 
+     * Visibility: public
+     * State: Valid from any state
+     * Concurrency: callable from any thread
+     *
+     * @param new_handler the new handler to set
+     */
     void set_handler(handler_ptr new_handler) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        if (m_detached) {return;}
         
         if (!new_handler) {
-            m_endpoint.elog().at(log::elevel::FATAL) 
-                << "Tried to switch to a NULL handler." << log::endl;
+            elog().at(log::elevel::FATAL) << "Tried to switch to a NULL handler." 
+                                          << log::endl;
             terminate(true);
             return;
         }
         
-        handler_ptr old_handler = get_handler();
+        m_endpoint.endpoint_base::m_io_service.post(
+            m_strand.wrap(boost::bind(
+                &type::set_handler_internal,
+                type::shared_from_this(),
+                new_handler
+            ))
+        );
+    }
+    
+    /// Set connection read threshold
+    /**
+     * Set the read threshold for this connection. See endpoint::set_read_threshold for 
+     * more information about the read threshold.
+     * 
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @param val Size of the threshold in bytes
+     */
+    void set_read_threshold(size_t val) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
         
-        old_handler->on_unload(type::shared_from_this(),new_handler);
-        m_handler = new_handler;
-        new_handler->on_load(type::shared_from_this(),old_handler);
+        m_read_threshold = val;
+    }
+    
+    /// Get connection read threshold
+    /**
+     * Returns the connection read threshold. See set_read_threshold for more information
+     * about the read threshold.
+     * 
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @return Size of the threshold in bytes
+     */
+    size_t get_read_threshold() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        return m_read_threshold;
+    }
+    
+    /// Set connection silent close setting
+    /**
+     * See endpoint::set_silent_close for more information.
+     * 
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @param val New silent close value
+     */
+    void set_silent_close(bool val) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        m_silent_close = val;
+    }
+    
+    /// Get connection silent close setting
+    /**
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @return Current silent close value
+     * @see set_silent_close()
+     */
+    bool get_silent_close() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        return m_silent_close;
     }
     
     // TODO: deprecated. will change to get_rng?
@@ -235,13 +623,77 @@ public:
         return 0;
     }
     
+    /// Returns a reference to the endpoint's access logger.
+    /**
+     * Visibility: public
+     * State: Valid from any state
+     * Concurrency: callable from any thread
+     *
+     * @return A reference to the endpoint's access logger
+     */
     typename endpoint::alogger_type& alog() {
+        if (m_detached) {
+            throw exception("alog(): Endpoint was destroyed",error::ENDPOINT_UNAVAILABLE);
+        }
+        
         return m_endpoint.alog();
     }
-protected:  
+    
+    /// Returns a reference to the endpoint's error logger.
+    /**
+     * Visibility: public
+     * State: Valid from any state
+     * Concurrency: callable from any thread
+     *
+     * @return A reference to the endpoint's error logger
+     */
+    typename endpoint::elogger_type& elog() {
+        if (m_detached) {
+            throw exception("elog(): Endpoint was destroyed",error::ENDPOINT_UNAVAILABLE);
+        }
+        
+        return m_endpoint.elog();
+    }
+    
+    /// Returns a pointer to the endpoint's handler.
+    /**
+     * Visibility: public
+     * State: Valid from any state
+     * Concurrency: callable from any thread
+     *
+     * @return A pointer to the endpoint's default handler
+     */
+    handler_ptr get_handler() {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        return m_handler;
+    }
+    
+    /// Returns a reference to the connections strand object.
+    /**
+     * Visibility: public
+     * State: Valid from any state
+     * Concurrency: callable from any thread
+     *
+     * @return A reference to the connection's strand object
+     */
+    boost::asio::strand& get_strand() {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        return m_strand;
+    }
+public:
+//protected:  TODO: figure out why VCPP2010 doesn't like protected here
+
+    /// Socket initialization callback
+    /* This is the async return point for initializing the socket policy. After this point
+     * the socket is open and ready.
+     * 
+     * Visibility: protected
+     * State: Valid only once per connection during the initialization sequence.
+     * Concurrency: Must be called within m_strand
+     */
     void handle_socket_init(const boost::system::error_code& error) {
         if (error) {
-            m_endpoint.elog().at(log::elevel::ERROR) 
+            elog().at(log::elevel::RERROR) 
                 << "Socket initialization failed, error code: " << error 
                 << log::endl;
             this->terminate(false);
@@ -251,15 +703,33 @@ protected:
         role_type::async_init();
     }
 public: 
+    /// ASIO callback for async_read of more frame data
+    /**
+     * Callback after ASIO has read some data that needs to be sent to a frame processor
+     * 
+     * TODO: think about how receiving a very large buffer would affect concurrency due to
+     *       that handler running for an unusually long period of time? Is a maximum size
+     *       necessary on m_buf?
+     * TODO: think about how terminate here works with the locks and concurrency
+     * 
+     * Visibility: protected
+     * State: valid for states OPEN and CLOSING, ignored otherwise
+     * Concurrency: must be called via strand. Only one async_read should be outstanding
+     *              at a time. Should only be called from inside handle_read_frame or by
+     *              the role's init method.
+     */
     void handle_read_frame(const boost::system::error_code& error) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         // check if state changed while we were waiting for a read.
         if (m_state == session::state::CLOSED) { return; }
+        if (m_state == session::state::CONNECTING) { return; }
         
         if (error) {
             if (error == boost::asio::error::eof) {         
                 // got unexpected EOF
                 // TODO: log error
-                m_endpoint.elog().at(log::elevel::ERROR) 
+                elog().at(log::elevel::RERROR) 
                     << "Remote connection dropped unexpectedly" << log::endl;
                 terminate(false);
             } else if (error == boost::asio::error::operation_aborted) {
@@ -267,14 +737,14 @@ public:
                 // all connections on this io_service)
                 
                 // TODO: log error
-                m_endpoint.elog().at(log::elevel::ERROR) 
+                elog().at(log::elevel::RERROR) 
                     << "Terminating due to abort: " << error << log::endl;
                 terminate(true);
             } else {
                 // Other unexpected error
                 
                 // TODO: log error
-                m_endpoint.elog().at(log::elevel::ERROR) 
+                elog().at(log::elevel::RERROR) 
                     << "Terminating due to unknown error: " << error 
                     << log::endl;
                 terminate(false);
@@ -303,18 +773,18 @@ public:
                 
                 switch(e.code()) {
                     case processor::error::PROTOCOL_VIOLATION:
-                        send_close(close::status::PROTOCOL_ERROR, e.what());
+                        send_close(close::status::PROTOCOL_ERROR,e.what());
                         break;
                     case processor::error::PAYLOAD_VIOLATION:
-                        send_close(close::status::INVALID_PAYLOAD, e.what());
+                        send_close(close::status::INVALID_PAYLOAD,e.what());
                         break;
                     case processor::error::INTERNAL_ENDPOINT_ERROR:
-                        send_close(close::status::INTERNAL_ENDPOINT_ERROR, e.what());
+                        send_close(close::status::INTERNAL_ENDPOINT_ERROR,e.what());
                         break;
                     case processor::error::SOFT_ERROR:
                         continue;
                     case processor::error::MESSAGE_TOO_BIG:
-                        send_close(close::status::MESSAGE_TOO_BIG, e.what());
+                        send_close(close::status::MESSAGE_TOO_BIG,e.what());
                         break;
                     case processor::error::OUT_OF_MESSAGES:
                         // we need to wait for a message to be returned by the
@@ -325,13 +795,9 @@ public:
                         return;
                     default:
                         // Fatal error, forcibly end connection immediately.
-                        m_endpoint.elog().at(log::elevel::DEVEL) 
-                        << "Dropping TCP due to unrecoverable exception: "
-                        << e.code()
-                        << " ("
-                        << e.what()
-                        << ")" 
-                        << log::endl;
+                        elog().at(log::elevel::DEVEL) 
+                            << "Dropping TCP due to unrecoverable exception: " << e.code()
+                            << " (" << e.what() << ")" << log::endl;
                         terminate(true);
                 }
                 break;
@@ -340,40 +806,81 @@ public:
         }
         
         // try and read more
-        if (m_state != session::state::CLOSED && 
-            m_processor->get_bytes_needed() > 0) {
+        if (m_state != session::state::CLOSED && m_processor->get_bytes_needed() > 0) {
             // TODO: read timeout timer?
             
             boost::asio::async_read(
                 socket_type::get_socket(),
                 m_buf,
-                boost::asio::transfer_at_least(m_processor->get_bytes_needed()),
-                boost::bind(
+                boost::asio::transfer_at_least(std::min(
+                    m_read_threshold,
+                    static_cast<size_t>(m_processor->get_bytes_needed())
+                )),
+                m_strand.wrap(boost::bind(
                     &type::handle_read_frame,
                     type::shared_from_this(),
                     boost::asio::placeholders::error
-                )
+                ))
             );
         }
     }
-protected:  
-    void process_data(message::data_ptr msg) {
-        get_handler()->on_message(type::shared_from_this(),msg);
+public:
+//protected:  TODO: figure out why VCPP2010 doesn't like protected here 
+    /// Internal Implementation for set_handler
+    /**
+     * Visibility: protected
+     * State: Valid for all states
+     * Concurrency: Must be called within m_strand
+     *
+     * @param new_handler The handler to switch to
+     */
+    void set_handler_internal(handler_ptr new_handler) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (!new_handler) {            
+            elog().at(log::elevel::FATAL) 
+                << "Tried to switch to a NULL handler." << log::endl;
+            // TODO: unserialized call to terminate?
+            terminate(true);
+            return;
+        }
+        
+        handler_ptr old_handler = m_handler;
+        
+        old_handler->on_unload(type::shared_from_this(),new_handler);
+        m_handler = new_handler;
+        new_handler->on_load(type::shared_from_this(),old_handler);
     }
     
+    /// Dispatch a data message
+    /** 
+     * Visibility: private
+     * State: no state checking, should only be called within handle_read_frame
+     * Concurrency: Must be called within m_stranded method
+     */
+    void process_data(message::data_ptr msg) {
+        m_handler->on_message(type::shared_from_this(),msg);
+    }
+    
+    /// Dispatch or handle a control message
+    /** 
+     * Visibility: private
+     * State: no state checking, should only be called within handle_read_frame
+     * Concurrency: Must be called within m_stranded method
+     */
     void process_control(message::control_ptr msg) {
         bool response;
         switch (msg->get_opcode()) {
             case frame::opcode::PING:
-                response = get_handler()->on_ping(type::shared_from_this(),
-                                                  msg->get_payload());
+                response = m_handler->on_ping(type::shared_from_this(),
+                                              msg->get_payload());
                 if (response) {
-                    send_pong(msg->get_payload());
+                    pong(msg->get_payload());
                 }
                 break;
             case frame::opcode::PONG:
-                get_handler()->on_pong(type::shared_from_this(),
-                                       msg->get_payload());
+                m_handler->on_pong(type::shared_from_this(),
+                                   msg->get_payload());
                 // TODO: disable ping response timer
                 
                 break;
@@ -385,15 +892,13 @@ protected:
                 
                 if (m_state == session::state::OPEN) {
                     // other end is initiating
-                    m_endpoint.elog().at(log::elevel::DEVEL) 
-                    << "sending close ack" << log::endl;
+                    elog().at(log::elevel::DEVEL) << "sending close ack" << log::endl;
                     
                     // TODO:
                     send_close_ack();
                 } else if (m_state == session::state::CLOSING) {
                     // ack of our close
-                    m_endpoint.elog().at(log::elevel::DEVEL) 
-                    << "got close ack" << log::endl;
+                    elog().at(log::elevel::DEVEL) << "got close ack" << log::endl;
                     
                     terminate(false);
                     // TODO: start terminate timer (if client)
@@ -406,21 +911,36 @@ protected:
         }
     }
     
+    /// Send a close frame
+    /**
+     * Initiates a close handshake by sending a close frame with the given code 
+     * and reason. 
+     * 
+     * Visibility: protected
+     * State: Valid for OPEN, ignored otherwise.
+     * Concurrency: Must be called within m_strand
+     *
+     * @param code The code to send
+     * @param reason The reason to send
+     */
     void send_close(close::status::value code, const std::string& reason) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        if (m_detached) {return;}
+        
         if (m_state != session::state::OPEN) {
-            m_endpoint.elog().at(log::elevel::WARN) 
-                << "Tried to disconnect a session that wasn't open" 
-                << log::endl;
+            elog().at(log::elevel::WARN) 
+                << "Tried to disconnect a session that wasn't open" << log::endl;
             return;
         }
         
         if (close::status::invalid(code)) {
-            m_endpoint.elog().at(log::elevel::WARN) 
+            elog().at(log::elevel::WARN) 
                 << "Tried to close a connection with invalid close code: " 
                 << code << log::endl;
             return;
         } else if (close::status::reserved(code)) {
-            m_endpoint.elog().at(log::elevel::WARN) 
+            elog().at(log::elevel::WARN) 
                 << "Tried to close a connection with reserved close code: " 
                 << code << log::endl;
             return;
@@ -432,15 +952,20 @@ protected:
         
         m_timer.expires_from_now(boost::posix_time::milliseconds(1000));
         m_timer.async_wait(
-            boost::bind(
+            m_strand.wrap(boost::bind(
                 &type::fail_on_expire,
                 type::shared_from_this(),
                 boost::asio::placeholders::error
-            )
+            ))
         );
         
-        m_local_close_code = code;
-        m_local_close_reason = reason;
+        if (m_silent_close) {
+            m_local_close_code = close::status::NO_STATUS;
+            m_local_close_reason = "";
+        } else {
+            m_local_close_code = code;
+            m_local_close_reason = reason;
+        }
         
         // TODO: optimize control messages and handle case where endpoint is
         // out of messages
@@ -448,26 +973,42 @@ protected:
         
         if (!msg) {
             // server is out of resources, close connection.
-            m_endpoint.elog().at(log::elevel::ERROR) 
-            << "Server has run out of message buffers." 
-            << log::endl;
+            elog().at(log::elevel::RERROR) 
+                << "Server has run out of message buffers." << log::endl;
             terminate(true);
             return;
         }
         
         msg->reset(frame::opcode::CLOSE);
         m_processor->prepare_close_frame(msg,code,reason);
-        write_message(msg);
         
-        m_write_state = INTURRUPT;
+        m_endpoint.endpoint_base::m_io_service.post(
+            m_strand.wrap(boost::bind(
+                &type::write_message,
+                type::shared_from_this(),
+                msg
+            ))
+        );
+        
+        // By setting inturrupt here we flush all outgoing messages from the message
+        // queue. Doing so is compliant behavior but "non-strict". The default will be
+        // fully compliant. This should be a configurable setting. Production environments
+        // should choose the appropriate option.
+        // m_write_state = INTURRUPT;
     }
     
-    // send an acknowledgement close frame
+    /// send an acknowledgement close frame
+    /** 
+     * Visibility: private
+     * State: no state checking, should only be called within process_control
+     * Concurrency: Must be called within m_stranded method
+     */
     void send_close_ack() {
-        // TODO: state should be OPEN
-        
         // echo close value unless there is a good reason not to.
-        if (m_remote_close_code == close::status::NO_STATUS) {
+        if (m_silent_close) {
+            m_local_close_code = close::status::NO_STATUS;
+            m_local_close_reason = "";
+        } else if (m_remote_close_code == close::status::NO_STATUS) {
             m_local_close_code = close::status::NORMAL;
             m_local_close_reason = "";
         } else if (m_remote_close_code == close::status::ABNORMAL_CLOSE) {
@@ -499,45 +1040,35 @@ protected:
         
         if (!msg) {
             // server is out of resources, close connection.
-            m_endpoint.elog().at(log::elevel::ERROR) 
-            << "Server has run out of message buffers." 
-            << log::endl;
+            elog().at(log::elevel::RERROR) 
+                << "Server has run out of message buffers." << log::endl;
             terminate(true);
             return;
         }
         
         msg->reset(frame::opcode::CLOSE);
-        m_processor->prepare_close_frame(msg,
-                                        m_local_close_code,
-                                        m_local_close_reason);
-        write_message(msg);
-        m_write_state = INTURRUPT;
+        m_processor->prepare_close_frame(msg,m_local_close_code,m_local_close_reason);
+        
+        m_endpoint.endpoint_base::m_io_service.post(
+            m_strand.wrap(boost::bind(
+                &type::write_message,
+                type::shared_from_this(),
+                msg
+            ))
+        );
+        //m_write_state = INTURRUPT;        
     }
     
-    void send_ping(const std::string& payload) {
-        // TODO: optimize control messages and handle case where 
-        // endpoint is out of messages
-        message::data_ptr control = get_control_message2();
-        control->reset(frame::opcode::PING);
-        control->set_payload(payload);
-        m_processor->prepare_frame(control);
-        write_message(control);
-    }
-    
-    void send_pong(const std::string& payload) {
-        // TODO: optimize control messages and handle case where 
-        // endpoint is out of messages
-        message::data_ptr control = get_control_message2();
-        control->reset(frame::opcode::PONG);
-        control->set_payload(payload);
-        m_processor->prepare_frame(control);
-        write_message(control);
-    }
-    
+    /// Push message to write queue and start writer if it was idle
+    /** 
+     * Visibility: protected (called only by asio dispatcher)
+     * State: Valid from OPEN and CLOSING, ignored otherwise
+     * Concurrency: Must be called within m_stranded method
+     */
     void write_message(message::data_ptr msg) {
-        if (m_write_state == INTURRUPT) {
-            return;
-        }
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        if (m_state != session::state::OPEN && m_state != session::state::CLOSING) {return;}
+        if (m_write_state == INTURRUPT) {return;}
         
         m_write_buffer += msg->get_payload().size();
         m_write_queue.push(msg);
@@ -545,6 +1076,12 @@ protected:
         write();
     }
     
+    /// Begin async write of next message in list
+    /** 
+     * Visibility: private
+     * State: Valid only as called from write_message or handle_write
+     * Concurrency: Must be called within m_stranded method
+     */
     void write() {
         switch (m_write_state) {
             case IDLE:
@@ -565,47 +1102,51 @@ protected:
                 break;
         }
         
-        if (m_write_queue.size() > 0) {
+        if (!m_write_queue.empty()) {
             if (m_write_state == IDLE) {
                 m_write_state = WRITING;
             }
-            
-            //std::vector<boost::asio::const_buffer> data;
-            
-            
+                        
             m_write_buf.push_back(boost::asio::buffer(m_write_queue.front()->get_header()));
             m_write_buf.push_back(boost::asio::buffer(m_write_queue.front()->get_payload()));
             
-            m_endpoint.alog().at(log::alevel::DEVEL) << "write header: " << to_hex(m_write_queue.front()->get_header()) << log::endl;
+            //m_endpoint.alog().at(log::alevel::DEVEL) << "write header: " << zsutil::to_hex(m_write_queue.front()->get_header()) << log::endl;
             
             boost::asio::async_write(
                 socket_type::get_socket(),
                 m_write_buf,
-                //m_write_queue.front()->get_buffer(),
-                boost::bind(
+                m_strand.wrap(boost::bind(
                     &type::handle_write,
                     type::shared_from_this(),
                     boost::asio::placeholders::error
-                )
+                ))
             );
         } else {
             // if we are in an inturrupted state and had nothing else to write
             // it is safe to terminate the connection.
             if (m_write_state == INTURRUPT) {
-                m_endpoint.alog().at(log::alevel::DEBUG_CLOSE) 
+                alog().at(log::alevel::DEBUG_CLOSE) 
                     << "Exit after inturrupt" << log::endl;
                 terminate(false);
             }
         }
     }
     
+    /// async write callback
+    /** 
+     * Visibility: protected (called only by asio dispatcher)
+     * State: Valid from OPEN and CLOSING, ignored otherwise
+     * Concurrency: Must be called within m_stranded method
+     */
     void handle_write(const boost::system::error_code& error) {
         if (error) {
             if (error == boost::asio::error::operation_aborted) {
                 // previous write was aborted
-                m_endpoint.alog().at(log::alevel::DEBUG_CLOSE) 
-                    << "handle_write was called with operation_aborted error" 
-                    << log::endl;
+                if (!m_detached) {
+                    alog().at(log::alevel::DEBUG_CLOSE) 
+                        << "handle_write was called with operation_aborted error" 
+                        << log::endl;
+                }
             } else {
                 log_error("Error writing frame data",error);
                 terminate(false);
@@ -613,40 +1154,65 @@ protected:
             }
         }
         
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         if (m_write_queue.size() == 0) {
-            m_endpoint.alog().at(log::alevel::DEBUG_CLOSE) 
-                << "handle_write called with empty queue" << log::endl;
+            if (!m_detached) {
+                alog().at(log::alevel::DEBUG_CLOSE) 
+                    << "handle_write called with empty queue" << log::endl;
+            }
             return;
         }
         
         m_write_buffer -= m_write_queue.front()->get_payload().size();
         m_write_buf.clear();
+        
+        frame::opcode::value code = m_write_queue.front()->get_opcode();
+        
         m_write_queue.pop();
         
         if (m_write_state == WRITING) {
             m_write_state = IDLE;
         }
         
-        write();
+        if (code != frame::opcode::CLOSE) {
+            // only continue next write if the connection is still open
+            if (m_state == session::state::OPEN || m_state == session::state::CLOSING) {
+                write();
+            }
+        } else {
+            if (!m_detached) {
+                alog().at(log::alevel::DEBUG_CLOSE) 
+                        << "Exit after writing close frame" << log::endl;
+            }
+            terminate(false);
+        }
     }
     
-    // terminate cleans up a connection and removes it from the endpoint's 
-    // connection list.
+    /// Ends the connection by cleaning up based on current state
+    /** Terminate will review the outstanding resources and close each
+     * appropriately. Attached handlers will recieve an on_fail or on_close call
+     * 
+     * TODO: should we protect against long running handlers?
+     * 
+     * Visibility: protected
+     * State: Valid from any state except CLOSED.
+     * Concurrency: Must be called from within m_strand
+     *
+     * @param failed_by_me Whether or not to mark the connection as failed by me
+     */
     void terminate(bool failed_by_me) {
-        m_endpoint.alog().at(log::alevel::DEBUG_CLOSE) 
-            << "terminate called" << log::endl;
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        // If state is closed it either means terminate was called twice or
+        // something other than this library called it. In either case running
+        // it will only cause problems
+        if (m_state == session::state::CLOSED) {return;}
         
-        if (m_state == session::state::CLOSED) {
-            // shouldn't be here
-        }
-        
+        // TODO: ensure any other timers are accounted for here.
         // cancel the close timeout
         m_timer.cancel();
         
-        
-        
-        // If this was a websocket connection notify the application handler
-        // about the close using either on_fail or on_close
+        // version -1 is an HTTP (non-websocket) connection.
         if (role_type::get_version() != -1) {
             // TODO: note, calling shutdown on the ssl socket for an HTTP
             // connection seems to cause shutdown to block for a very long time.
@@ -660,65 +1226,76 @@ protected:
             m_state = session::state::CLOSED;
             
             if (old_state == session::state::CONNECTING) {
-                get_handler()->on_fail(type::shared_from_this());
+                m_handler->on_fail(type::shared_from_this());
             } else if (old_state == session::state::OPEN || 
-                       old_state == session::state::CLOSING) {
-                get_handler()->on_close(type::shared_from_this());
-            } else {
-                // if we were already closed something is wrong
+                       old_state == session::state::CLOSING)
+            {
+                m_handler->on_close(type::shared_from_this());
             }
-            log_close_result();
+            
+            log_close_result(); 
         }
+        
         // finally remove this connection from the endpoint's list. This will
-        // remove the last shared pointer to the connection held by WS++.
-        m_endpoint.remove_connection(type::shared_from_this());
+        // remove the last shared pointer to the connection held by WS++. If we
+        // are DETACHED this has already been done and can't be done again.
+        if (!m_detached) {
+            m_endpoint.remove_connection(type::shared_from_this());
+        }
     }
     
     // this is called when an async asio call encounters an error
     void log_error(std::string msg,const boost::system::error_code& e) {
-        m_endpoint.elog().at(log::elevel::ERROR) 
-        << msg << "(" << e << ")" << log::endl;
+        if (!m_detached) {return;}
+        elog().at(log::elevel::RERROR) << msg << "(" << e << ")" << log::endl;
     }
     
     void log_close_result() {
-        m_endpoint.alog().at(log::alevel::DISCONNECT) 
-        //<< "Disconnect " << (m_was_clean ? "Clean" : "Unclean")
-        << "Disconnect " 
-        << " close local:[" << m_local_close_code
-        << (m_local_close_reason == "" ? "" : ","+m_local_close_reason) 
-        << "] remote:[" << m_remote_close_code 
-        << (m_remote_close_reason == "" ? "" : ","+m_remote_close_reason) << "]"
-        << log::endl;
+        if (!m_detached) {return;}
+        alog().at(log::alevel::DISCONNECT) 
+            //<< "Disconnect " << (m_was_clean ? "Clean" : "Unclean")
+            << "Disconnect " 
+            << " close local:[" << m_local_close_code
+            << (m_local_close_reason == "" ? "" : ","+m_local_close_reason) 
+            << "] remote:[" << m_remote_close_code 
+            << (m_remote_close_reason == "" ? "" : ","+m_remote_close_reason) << "]"
+            << log::endl;
      }
     
     void fail_on_expire(const boost::system::error_code& error) {
         if (error) {
             if (error != boost::asio::error::operation_aborted) {
-                m_endpoint.elog().at(log::elevel::DEVEL) 
-                << "fail_on_expire timer ended in unknown error" << log::endl;
+                if (!m_detached) {
+                    elog().at(log::elevel::DEVEL) 
+                        << "fail_on_expire timer ended in unknown error" << log::endl;
+                }
                 terminate(false);
             }
             return;
         }
-        m_endpoint.elog().at(log::elevel::DEVEL) 
-            << "fail_on_expire timer expired" << log::endl;
+        if (!m_detached) {
+            elog().at(log::elevel::DEVEL) 
+                << "fail_on_expire timer expired" << log::endl;
+        }
         terminate(true);
     }
     
     boost::asio::streambuf& buffer()  {
         return m_buf;
     }
-    
-    handler_ptr get_handler() {
-        return m_handler;
-    }
-protected:
+public:
+//protected:  TODO: figure out why VCPP2010 doesn't like protected here
     endpoint_type&              m_endpoint;
-    handler_ptr                 m_handler;
+    
+    // Overridable connection specific settings
+    handler_ptr                 m_handler;          // object to dispatch callbacks to
+    size_t                      m_read_threshold;   // maximum number of bytes to fetch in
+                                                    //   a single async read.
+    bool                        m_silent_close;     // suppresses the return of detailed 
+                                                    //   close codes.
     
     // Network resources
     boost::asio::streambuf      m_buf;
-    
     boost::asio::deadline_timer m_timer;
     
     // WebSocket connection state
@@ -745,6 +1322,11 @@ protected:
     // Read queue
     read_state                  m_read_state;
     message::control_ptr        m_control_message;
+    
+    // concurrency support
+    mutable boost::recursive_mutex      m_lock;
+    boost::asio::strand         m_strand;
+    bool                        m_detached; // TODO: this should be atomic
 };
 
 // connection related types that it and its policy classes need.
@@ -762,7 +1344,68 @@ struct connection_traits< connection<endpoint,role,socket> > {
     typedef role< type > role_type;
     typedef socket< type > socket_type;
 };
+
+/// convenience overload for sending a one off message.
+/**
+ * Creates a message, fills in payload, and queues a write as a message of
+ * type op. Default type is TEXT. 
+ * 
+ * Visibility: public
+ * State: Valid from OPEN, ignored otherwise
+ * Concurrency: callable from any thread
+ *
+ * @param payload Payload to write_state
+ * @param op opcode to send the message as
+ */
+template <typename endpoint,template <class> class role,template <class> class socket>
+void 
+connection<endpoint,role,socket>::send(const std::string& payload,frame::opcode::value op)
+{
+    {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        if (m_state != session::state::OPEN) {return;}
+    }
     
+    websocketpp::message::data::ptr msg = get_control_message2();
+    
+    if (!msg) {
+        throw exception("Endpoint send queue is full",error::SEND_QUEUE_FULL);
+    }
+    if (op != frame::opcode::TEXT && op != frame::opcode::BINARY) {
+        throw exception("opcode must be either TEXT or BINARY",error::GENERIC);
+    }
+    
+    msg->reset(op);
+    msg->set_payload(payload);
+    send(msg);
+}
+
+/// Send message
+/**
+ * Prepares (if necessary) and sends the given message 
+ * 
+ * Visibility: public
+ * State: Valid from OPEN, ignored otherwise
+ * Concurrency: callable from any thread
+ *
+ * @param msg A pointer to a data message buffer to send.
+ */
+template <typename endpoint,template <class> class role,template <class> class socket>
+void connection<endpoint,role,socket>::send(message::data_ptr msg) {
+    boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+    if (m_state != session::state::OPEN) {return;}
+    
+    m_processor->prepare_frame(msg);
+    
+    m_endpoint.endpoint_base::m_io_service.post(
+        m_strand.wrap(boost::bind(
+            &type::write_message,
+            type::shared_from_this(),
+            msg
+        ))
+    );
+}
+
 } // namespace websocketpp
 
 #endif // WEBSOCKETPP_CONNECTION_HPP

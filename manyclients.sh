@@ -45,13 +45,12 @@ do
     else
         ./websocketclient $2 $3 > /dev/null &
 	PIDLIST="$PIDLIST $!"
+	trap "kill $PIDLIST" SIGINT SIGTERM
 	sleep $SLEEP
     fi
 done
 echo -en "\033[1;31mDone spawning processes in $(($(date +%s)-T)) seconds\033[0m \n"
 echo "Waiting for completion now ..."
-
-trap "kill $PIDLIST" SIGINT SIGTERM
 
 WAIT=0
 for job in $PIDLIST

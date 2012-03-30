@@ -1,14 +1,6 @@
-CFLAGS = -O2
-LDFLAGS = 
+BOOST_LIBS=boost_system boost_date_time boost_thread boost_regex boost_random
 
-CXX		?= c++
-SHARED  ?= "1"
-
-ifeq ($(SHARED), 1)
-	LDFLAGS := $(LDFLAGS) -lboost_system -lboost_thread -lpthread -lwebsocketpp
-else
-	LDFLAGS := $(LDFLAGS) ../../libwebsocketpp.a -lboost_system -lboost_thread -lboost_date_time -lboost_regex -lboost_random -lboost_program_options -lpthread 
-endif
+include ../common.mk
 
 fuzzing_client: fuzzing_client.o
 	$(CXX) $(CFLAGS) $^ -o $@ $(LDFLAGS)

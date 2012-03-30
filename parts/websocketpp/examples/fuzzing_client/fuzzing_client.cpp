@@ -86,7 +86,7 @@ public:
     void fill_utf8(std::string& data,size_t size,bool random = true) {
         if (random) {
             uint32_t val;
-            for (int i = 0; i < size; i++) {
+            for (size_t i = 0; i < size; i++) {
                 if (i%4 == 0) {
                     val = uint32_t(rand());
                 }
@@ -101,7 +101,7 @@ public:
     void fill_binary(std::string& data,size_t size,bool random = true) {
         if (random) {
             int32_t val;
-            for (int i = 0; i < size; i++) {
+            for (size_t i = 0; i < size; i++) {
                 if (i%4 == 0) {
                     val = rand();
                 }
@@ -305,14 +305,16 @@ int main(int argc, char* argv[]) {
         uri = argv[1];
     }
     
+    
+    
     std::vector<client::handler_ptr>  tests;
     
     // 9.1.x and 9.2.x tests
-    /*for (int i = 1; i <= 2; i++) {
+    for (int i = 1; i <= 2; i++) {
         for (int j = 1; j <= 6; j++) {
             tests.push_back(client::handler_ptr(new test_9_1_X(i,j)));
         }
-    }*/
+    }
     
     // 9.7.x and 9.8.x tests
     for (int i = 7; i <= 8; i++) {
@@ -327,7 +329,7 @@ int main(int argc, char* argv[]) {
         endpoint.alog().unset_level(websocketpp::log::alevel::ALL);
         endpoint.elog().unset_level(websocketpp::log::elevel::ALL);
         
-        for (int i = 0; i < tests.size(); i++) {
+        for (size_t i = 0; i < tests.size(); i++) {
             if (i > 0) {
                 endpoint.reset();
                 endpoint.set_handler(tests[i]);

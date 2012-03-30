@@ -65,42 +65,20 @@ public:
         while(input.good() && i < size) {
             c = input.get();
             
-            if (input.good()) {
+            if (!input.fail()) {
                 if (m_masking_index >= 0) {
-                    c = c ^ m_masking_key[(m_masking_index++)%4];
+                    c = c ^ m_masking_key.c[(m_masking_index++)%4];
                 }
                 
                 m_payload.push_back(c);
                 i++;
-            } else if (input.eof()) {
-                break;
-            } else {
+            }
+            
+            if (input.bad()) {
                 throw processor::exception("istream read error 2",
                                            processor::error::FATAL_ERROR);
             }
         }
-        
-        /*for (i = 0; i < size; ++i) {
-            if (input.good()) {
-                c = input.get();
-               
-                if (input.fail()) {
-                    throw processor::exception("istream read error",
-                                               processor::error::FATAL_ERROR);
-                }
-                
-                if (m_masking_index >= 0) {
-                    c = c ^ m_masking_key[(m_masking_index++)%4];
-                }
-                
-                m_payload.push_back(c);
-               
-            } else if (input.eof()) {
-                break;
-            } else {
-                 throw processor::exception("istream read error",processor::error::FATAL_ERROR);
-            }
-        }*/
         
         // successfully read all bytes
         return i;
@@ -155,7 +133,8 @@ public:
     }
     
     void set_masking_key(int32_t key) {
-        *reinterpret_cast<int32_t*>(m_masking_key) = key;
+        //*reinterpret_cast<int32_t*>(m_masking_key) = key;
+        m_masking_key.i = key;
         m_masking_index = (key == 0 ? -1 : 0);
     }
 private:
@@ -164,16 +143,21 @@ private:
             throw processor::exception("get_raw_close_code called with invalid size",processor::error::FATAL_ERROR);
         }
         
-        char val[2];
-        
-        val[0] = m_payload[0];
-        val[1] = m_payload[1];
-        
-        return ntohs(*(reinterpret_cast<uint16_t*>(&val[0])));
+        union {uint16_t i;char c[2];} val;
+         
+        val.c[0] = m_payload[0];
+        val.c[1] = m_payload[1];
+         
+        return ntohs(val.i);
     }
     
     static const uint64_t PAYLOAD_SIZE_INIT = 128; // 128B
     static const uint64_t PAYLOAD_SIZE_MAX = 128; // 128B
+    
+    union masking_key {
+        int32_t i;
+        char    c[4];
+    };
     
     // Message state
     frame::opcode::value        m_opcode;
@@ -182,7 +166,8 @@ private:
     utf8_validator::validator   m_validator;
     
     // Masking state
-    unsigned char               m_masking_key[4];
+    masking_key                 m_masking_key;
+    //unsigned char               m_masking_key[4];
     int                         m_masking_index;
     
     // Message payload

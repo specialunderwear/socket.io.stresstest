@@ -28,22 +28,13 @@
 #ifndef WEBSOCKETPP_ENDPOINT_HPP
 #define WEBSOCKETPP_ENDPOINT_HPP
 
-#ifndef SIZE_MAX
-#define SIZE_MAX ((size_t)(-1))
-#endif
-#ifndef INT32_MIN
-#define INT32_MIN INT_MIN
-#endif
-#ifndef INT32_MAX
-#define INT32_MAX INT_MAX
-#endif
-
 #include "connection.hpp"
 #include "sockets/plain.hpp" // should this be here?
 #include "logger/logger.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/shared_ptr.hpp>
+#include <boost/thread/recursive_mutex.hpp>
 #include <boost/utility.hpp>
 
 #include <iostream>
@@ -80,9 +71,9 @@ template <
     template <class> class logger = log::logger>
 class endpoint 
  : public endpoint_base,
-   public role< endpoint<role,socket> >,
-   public socket< endpoint<role,socket> >,
-   boost::noncopyable 
+   public role< endpoint<role,socket,logger> >,
+   public socket< endpoint<role,socket,logger> >,
+   boost::noncopyable
 {
 public:
     /// Type of the traits class that stores endpoint related types.
@@ -115,14 +106,17 @@ public:
     // functions in the derived endpoint. This is done to limit the use of 
     // public methods in endpoint and its CRTP bases to only those methods 
     // intended for end-application use.
+#ifdef _WEBSOCKETPP_CPP11_FRIEND_
+    // Highly simplified and preferred C++11 version:
+    friend role_type;
+    friend socket_type;
+    friend connection_type;
+#else
     friend class role< endpoint<role,socket> >;
     friend class socket< endpoint<role,socket> >;
     friend class connection<type,role< type >::template connection,socket< type >::template connection>;
+#endif
     
-    // Highly simplified and preferred C++11 version:
-    // friend role_type; 
-    // friend socket_type;
-    // friend connection_type;
     
     /// Construct an endpoint.
     /**
@@ -135,18 +129,30 @@ public:
     explicit endpoint(handler_ptr handler) 
      : role_type(endpoint_base::m_io_service),
        socket_type(endpoint_base::m_io_service),
-       m_state(IDLE),
        m_handler(handler),
+       m_read_threshold(DEFAULT_READ_THRESHOLD),
+       m_silent_close(DEFAULT_SILENT_CLOSE),
+       m_state(IDLE),
        m_pool(new message::pool<message::data>(1000)),
        m_pool_control(new message::pool<message::data>(SIZE_MAX))
     {
         m_pool->set_callback(boost::bind(&type::on_new_message,this));
     }
     
-    /// Destroy and endpoint
+    /// Destroy an endpoint
     ~endpoint() {
+        // Tell the memory pool we don't want to be notified about newly freed
+        // messages any more (because we wont be here)
         m_pool->set_callback(NULL);
-        // TODO: destroy all connections associated with this endpoint?
+        
+        // Detach any connections that are still alive at this point
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        typename std::set<connection_ptr>::iterator it;
+        
+        while (!m_connections.empty()) {
+            remove_connection(*m_connections.begin());
+        }
     }
     
     // copy/assignment constructors require C++11
@@ -156,6 +162,10 @@ public:
     
     /// Returns a reference to the endpoint's access logger.
     /**
+     * Visibility: public
+     * State: Any
+     * Concurrency: Callable from anywhere
+     * 
      * @return A reference to the endpoint's access logger. See @ref logger
      * for more details about WebSocket++ logging policy classes.
      *
@@ -184,12 +194,30 @@ public:
         return m_elog;
     }
     
-    /// Updates the default handler to be used for future connections
+    /// Get default handler
     /**
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @return A pointer to the default handler
+     */
+    handler_ptr get_handler() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        return m_handler;
+    }
+    
+    /// Sets the default handler to be used for future connections
+    /**
+     * Does not affect existing connections.
+     * 
      * @param new_handler A shared pointer to the new default handler. Must not
      * be NULL.
      */
     void set_handler(handler_ptr new_handler) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         if (!new_handler) {
             elog().at(log::elevel::FATAL) 
                 << "Tried to switch to a NULL handler." << log::endl;
@@ -197,6 +225,81 @@ public:
         }
         
         m_handler = new_handler;
+    }
+    
+    /// Set endpoint read threshold
+    /**
+     * Sets the default read threshold value that will be passed to new connections. 
+     * Changing this value will only affect new connections, not existing ones. The read
+     * threshold represents the largest block of payload bytes that will be processed in
+     * a single async read. Lower values may experience better callback latency at the 
+     * expense of additional ASIO context switching overhead. This value also affects the
+     * maximum number of bytes to be buffered before performing utf8 and other streaming
+     * validation.
+     * 
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @param val Size of the threshold in bytes
+     */
+    void set_read_threshold(size_t val) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        m_read_threshold = val;
+    }
+    
+    /// Get endpoint read threshold
+    /**
+     * Returns the endpoint read threshold. See set_read_threshold for more information
+     * about the read threshold.
+     * 
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @return Size of the threshold in bytes
+     * @see set_read_threshold()
+     */
+    size_t get_read_threshold() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        return m_read_threshold;
+    }
+    
+    /// Set connection silent close setting
+    /**
+     * Silent close suppresses the return of detailed connection close information during
+     * the closing handshake. This information is critically useful for debugging but may
+     * be undesirable for security reasons for some production environments. Close reasons
+     * could be used to by an attacker to confirm that the implementation is out of 
+     * resources or be used to identify the WebSocket library in use.
+     * 
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @param val New silent close value
+     */
+    void set_silent_close(bool val) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        m_silent_close = val;
+    }
+    
+    /// Get connection silent close setting
+    /**
+     * Visibility: public
+     * State: valid always
+     * Concurrency: callable from anywhere
+     * 
+     * @return Current silent close value
+     * @see set_silent_close()
+     */
+    bool get_silent_close() const {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        return m_silent_close;
     }
     
     /// Cleanly closes all websocket connections
@@ -213,6 +316,8 @@ public:
     void close_all(close::status::value code = close::status::GOING_AWAY, 
                    const std::string& reason = "")
     {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         alog().at(log::alevel::ENDPOINT) 
         << "Endpoint received signal to close all connections cleanly with code " 
         << code << " and reason " << reason << log::endl;
@@ -220,8 +325,11 @@ public:
         // TODO: is there a more elegant way to do this? In some code paths 
         // close can call terminate immediately which removes the connection
         // from m_connections, invalidating the iterator.
-        while(!m_connections.empty()) {
-            (*m_connections.begin())->close(code,reason);
+        typename std::set<connection_ptr>::iterator it;
+        
+        for (it = m_connections.begin(); it != m_connections.end();) {
+            const connection_ptr con = *it++;
+            con->close(code,reason);
         }
     }
     
@@ -236,7 +344,11 @@ public:
      * If clean is true stop will use code and reason for the close code and 
      * close reason when it closes open connections. The default code is 
      * 1001/Going Away and the default reason is blank.
-     *
+     * 
+     * Visibility: public
+     * State: Valid from RUNNING only
+     * Concurrency: Callable from anywhere
+     * 
      * @param clean Whether or not to wait until all connections have been
      * cleanly closed to stop io_service operations.
      * @param code The WebSocket close code to send to remote clients as the
@@ -247,7 +359,9 @@ public:
     void stop(bool clean = true, 
               close::status::value code = close::status::GOING_AWAY, 
               const std::string& reason = "")
-    {
+    {        
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         if (clean) {
             alog().at(log::alevel::ENDPOINT) 
             << "Endpoint is stopping cleanly" << log::endl;
@@ -274,15 +388,21 @@ protected:
      * If the endpoint is in a state where it is trying to stop or has already
      * stopped an empty shared pointer is returned.
      * 
+     * Visibility: protected
+     * State: Always valid, behavior differs based on state
+     * Concurrency: Callable from anywhere
+     *
      * @return A shared pointer to the newly created connection or an empty
      * shared pointer if one could not be created.
      */
     connection_ptr create_connection() {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         if (m_state == STOPPING || m_state == STOPPED) {
             return connection_ptr();
         }
         
-        connection_ptr new_connection(new connection_type(*this,get_handler()));
+        connection_ptr new_connection(new connection_type(*this,m_handler));
         m_connections.insert(new_connection);
         
         alog().at(log::alevel::DEVEL) << "Connection created: count is now: " 
@@ -300,9 +420,20 @@ protected:
      * the shared pointer the connection will be freed and any state it 
      * contained (close code status, etc) will be lost.
      * 
+     * Visibility: protected
+     * State: Always valid, behavior differs based on state
+     * Concurrency: Callable from anywhere
+     * 
      * @param con A shared pointer to a connection created by this endpoint.
      */
     void remove_connection(connection_ptr con) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
+        // TODO: is this safe to use?
+        // Detaching signals to the connection that the endpoint is no longer aware of it
+        // and it is no longer safe to assume the endpoint exists.
+        con->detach();
+        
         m_connections.erase(con);
         
         alog().at(log::alevel::DEVEL) << "Connection removed: count is now: " 
@@ -318,17 +449,14 @@ protected:
         }
     }
     
-    /// Gets a shared pointer to this endpoint's default connection handler
-    handler_ptr get_handler() {
-        return m_handler;
-    }
-    
     /// Gets a shared pointer to a read/write data message.
+    // TODO: thread safety
     message::data::ptr get_data_message() {
 		return m_pool->get();
 	}
     
     /// Gets a shared pointer to a read/write control message.
+    // TODO: thread safety
     message::data::ptr get_control_message() {
 		return m_pool_control->get();
 	}
@@ -336,6 +464,8 @@ protected:
     /// Asks the endpoint to restart this connection's handle_read_frame loop
     /// when there are avaliable data messages.
     void wait(connection_ptr con) {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         m_read_waiting.push(con);
         alog().at(log::alevel::DEVEL) << "connection " << con << " is waiting. " << m_read_waiting.size() << log::endl;
     }
@@ -343,6 +473,8 @@ protected:
     /// Message pool callback indicating that there is a free data message
     /// avaliable. Causes one waiting connection to get restarted.
     void on_new_message() {
+        boost::lock_guard<boost::recursive_mutex> lock(m_lock);
+        
         if (!m_read_waiting.empty()) {
             connection_ptr next = m_read_waiting.front();
             
@@ -362,8 +494,14 @@ private:
         STOPPED = 3
     };
     
-    state                       m_state;
+    // default settings to pass to connections
     handler_ptr                 m_handler;
+    size_t                      m_read_threshold;
+    bool                        m_silent_close;
+    
+    // other stuff
+    state                       m_state;
+    
     std::set<connection_ptr>    m_connections;
     alogger_type                m_alog;
     elogger_type                m_elog;
@@ -372,6 +510,9 @@ private:
     message::pool<message::data>::ptr   m_pool;
     message::pool<message::data>::ptr   m_pool_control;
     std::queue<connection_ptr>          m_read_waiting;
+    
+    // concurrency support
+    mutable boost::recursive_mutex      m_lock;
 };
 
 /// traits class that allows looking up relevant endpoint types by the fully 
@@ -428,14 +569,14 @@ struct endpoint_traits< endpoint<role, socket, logger> > {
          * @param connection A shared pointer to the connection that was transferred
          * @param old_handler A shared pointer to the previous handler
          */
-        virtual void on_load(connection_ptr connection, handler_ptr old_handler) {}
+        virtual void on_load(connection_ptr con, handler_ptr old_handler) {}
         /// on_unload is the last callback called for a handler before control
         /// of a connection is handed over to a new handler mid flight.
         /**
          * @param connection A shared pointer to the connection being transferred
          * @param old_handler A shared pointer to the new handler
          */
-        virtual void on_unload(connection_ptr connection, handler_ptr new_handler) {}
+        virtual void on_unload(connection_ptr con, handler_ptr new_handler) {}
     };
     
 };

@@ -236,7 +236,7 @@ public:
             response.add_header("Upgrade","websocket");
             response.add_header("Connection","Upgrade");
         } else {
-            //m_endpoint->elog().at(log::elevel::ERROR) 
+            //m_endpoint->elog().at(log::elevel::RERROR) 
             //<< "Error computing handshake sha1 hash" << log::endl;
             // TODO: make sure this error path works
             response.set_status(http::status_code::INTERNAL_SERVER_ERROR);
@@ -397,7 +397,7 @@ public:
     }
     
     void reset() {
-        m_state = m_state = hybi_state::READ_HEADER;
+        m_state = hybi_state::READ_HEADER;
         m_header.reset();
     }
     
@@ -550,12 +550,12 @@ public:
         }
         
         // set close payload
-        char val[3];
-        *reinterpret_cast<uint16_t*>(&val[0]) = htons(code);
-        val[2] = 0x00;
+        if (code != close::status::NO_STATUS) {
+            const uint16_t payload = htons(code);
         
-        msg->set_payload(std::string(val));
-        msg->append_payload(reason);
+            msg->set_payload(std::string(reinterpret_cast<const char*>(&payload), 2));
+            msg->append_payload(reason);
+        }
         
         // prepare rest of frame
         prepare_frame(msg);
