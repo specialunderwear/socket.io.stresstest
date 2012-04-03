@@ -29,7 +29,6 @@ void connect_and_run(std::string &uri, sequence::ActionSequence &actions) {
     endpoint.alog().LOGLEVEL();
     endpoint.elog().LOGLEVEL();
     typename CLIENT_TYPE::connection_ptr con = endpoint.connect(socket_io_handler->websocket_uri());
-    con->add_request_header("User Agent","WebSocket++/0.2.0");
     endpoint.run();
 }
 
