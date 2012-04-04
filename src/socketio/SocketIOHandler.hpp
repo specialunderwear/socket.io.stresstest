@@ -188,6 +188,10 @@ namespace socketio {
                 } else {
                     con->close(websocketpp::close::status::NORMAL, "End of test sequence ++++++++++++++++++++++++++++++++");
                 }
+            } else if (payload.substr(0, 3) == "2::") {
+                // repond to heartbeat
+                std::cout << "heartbeat received, sending ack: " << payload << std::endl;
+                con->send("2::", websocketpp::frame::opcode::TEXT);
             } else {
                 std::cout << "message received: " << payload << std::endl;
             }
