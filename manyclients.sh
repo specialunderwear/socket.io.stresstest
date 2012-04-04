@@ -40,14 +40,12 @@ for (( i = 0; i < $1 ; i++ ))
 do
     if [ $VERBOSE != "0" ]; then
         ./websocketclient $2 $3 &
-	PIDLIST="$PIDLIST $!"
-	sleep $SLEEP
     else
         ./websocketclient $2 $3 > /dev/null &
-	PIDLIST="$PIDLIST $!"
-	trap "kill $PIDLIST" SIGINT SIGTERM
-	sleep $SLEEP
     fi
+    PIDLIST="$PIDLIST $!"
+    trap "kill $PIDLIST" SIGINT SIGTERM
+    sleep $SLEEP
 done
 echo -en "\033[1;31mDone spawning processes in $(($(date +%s)-T)) seconds\033[0m \n"
 echo "Waiting for completion now ..."
