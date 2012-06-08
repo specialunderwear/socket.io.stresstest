@@ -95,7 +95,7 @@ namespace socketio {
         
         std::string _parse_session_id(const std::string &message) {
             Json::Value root = _parse_message(message);
-            return root["args"][0]["SessionID"].asString();
+            return root["args"][0]["sessionId"].asString();
         }
  
         void _log_message(const std::string &message, const boost::format &next_message) {

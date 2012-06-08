@@ -89,7 +89,7 @@ lib/libwebsocketpp.a: $(WEBSOCKETPP_BUILD)/data.o $(WEBSOCKETPP_BUILD)/hybi_head
 # WEBSOCKETCLIENT
 #####################################
 
-build/websocketclient.o: src/websocketclient.cpp
+build/websocketclient.o: src/websocketclient.cpp src/socketio/SocketIOHandler.hpp
 	g++ src/websocketclient.cpp $(INCLUDE_DIRS) $(CFLAGS) -c -o build/websocketclient.o
 
 build/ActionSequence.o: src/sequence/ActionSequence.cpp
