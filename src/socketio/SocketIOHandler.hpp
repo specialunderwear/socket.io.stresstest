@@ -84,13 +84,13 @@ namespace socketio {
         
         void _on_heartbeat_timeout(typename Handler::connection_ptr con, const boost::system::error_code& error) {
             if (!error) {
-				std::cerr << "No heartbeat received from server, sending 2::" << std::endl;
+                std::cerr << "No heartbeat received from server, sending 2::" << std::endl;
                 con->send("2::", websocketpp::frame::opcode::TEXT);
-			} else if (error != boost::asio::error::operation_aborted) {
-				std::cerr << "Problem with client hearbeat, code: boost::asio::error::" << error << std::endl;
-				std::cerr << "exiting ..." << std::endl;
-				exit(1);
-			}
+            } else if (error != boost::asio::error::operation_aborted) {
+                std::cerr << "Problem with client hearbeat, code: boost::asio::error::" << error << std::endl;
+                std::cerr << "exiting ..." << std::endl;
+                exit(1);
+            }
         }
         
         std::string _parse_session_id(const std::string &message) {
