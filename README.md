@@ -30,3 +30,11 @@ SocketIOHandler.cpp to parse it correctly from you login response.
 
 You can probably make the client click through most of your site this way.
 Always send ``0::`` as the last message.
+
+Requirements
+------------
+
+You need to have BOOST installed on your system. I included the other
+dependencies in the ``parts`` directory because I developed this in svn.
+
+This software was tested on mac osx and ubuntu.
