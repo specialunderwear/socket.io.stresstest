@@ -9,7 +9,11 @@ Usage:
 
 ``-w`` (seconds) will spawn a new process only every (seconds) seconds, instead of all at once
 
-Your inputfile should be a json list with the exact requests the browser would send to your backend:
+``100`` will spawn one hundred socket.io clients at once.
+
+``http(s)://host/`` should be set to your socket.io server address.
+
+``inputfile`` should be a json list with the exact requests the browser would send to your backend:
 
     [
         "5:::{\"name\":\"login\",\"args\":[{\"user\":\"michaeljackson\",\"password\":\"beatit\"}]}",
@@ -18,9 +22,11 @@ Your inputfile should be a json list with the exact requests the browser would s
     ]
 
 the stresstest will execute all these requests in that order and ignore the
-responses, except in one special case. You can make the client click through
-your site this way. Always end with ``0::``.
+responses, except in one special case.
 
 Notice the ``%1%`` in the second request? That will be replaced with the sessionid
 returned in the first request. Modify ``_parse_session_id`` inside
 SocketIOHandler.cpp to parse it correctly from you login response.
+
+You can probably make the client click through most of your site this way.
+Always send ``0::`` as the last message.
