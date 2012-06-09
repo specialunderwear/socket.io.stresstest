@@ -24,4 +24,3 @@ your site this way.
 Notices the %1% in the second request? That will be replaced with the sessionid
 returned in the first request. Modify ``_parse_session_id`` inside
 SocketIOHandler.cpp to parse it correctly from you login response.
-=======
